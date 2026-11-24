@@ -1,7 +1,7 @@
 """Data-driven NBA player projections and model-generated parlay candidates."""
 import math
 import numpy as np
-from bdl import player_game_stats_many, current_season_start, players_for_teams, team_advanced_averages, injuries
+from bdl import player_game_stats_many, current_season_start, players_for_teams
 from features import player_rows, rolling_projection, empirical_over_probability, as_float, minutes_projection
 
 PROP_STATS = ["PTS", "REB", "AST", "3PM", "STL", "BLK"]
@@ -32,7 +32,7 @@ def _injury_ids():
     except Exception:
         return set()
 
-def build_player_projection_board(games, max_players_per_team=8):
+def build_player_projection_board(games, max_players_per_team=4):
     """Fetch slate rosters and player logs in bulk; optional context never blocks the board."""
     season = current_season_start()
     unavailable = _injury_ids()
