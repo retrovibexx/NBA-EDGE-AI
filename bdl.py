@@ -80,3 +80,7 @@ def player_season_averages(player_ids,season):
     ids=[int(x) for x in player_ids if x is not None]
     if not ids: return []
     return pages("/nba/v1/season_averages/general",{"season":season,"season_type":"regular","type":"base","player_ids[]":ids,"per_page":100},3)
+
+@st.cache_data(ttl=21600,show_spinner=False)
+def player_advanced_averages(player_id,season):
+    return pages("/nba/v1/season_averages/general",{"season":season,"season_type":"regular","type":"advanced","player_ids[]":int(player_id),"per_page":100},2)
