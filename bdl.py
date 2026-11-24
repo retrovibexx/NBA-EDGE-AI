@@ -94,3 +94,10 @@ def player_season_averages(player_ids,season):
 @st.cache_data(ttl=21600,show_spinner=False)
 def player_advanced_averages(player_id,season):
     return pages("/nba/v1/season_averages/general",{"season":season,"season_type":"regular","type":"advanced","player_ids[]":int(player_id),"per_page":100},2)
+
+@st.cache_data(ttl=21600,show_spinner=False)
+def team_games_history(team_id,season_start):
+    seasons=[int(season_start)-2,int(season_start)-1,int(season_start)]
+    rows=pages("/v1/games",{"team_ids[]":int(team_id),"seasons[]":seasons,"per_page":100},12)
+    rows.sort(key=lambda x:x.get("date",""),reverse=True)
+    return rows
