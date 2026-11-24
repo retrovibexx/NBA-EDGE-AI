@@ -23,15 +23,6 @@ def _optional_opponent_context(team_id, season):
     except Exception:
         return {"def_rating": float("nan"), "pace": float("nan")}
 
-def _injury_ids():
-    try:
-        rows = injuries()
-        return {(x.get("player") or {}).get("id") for x in rows
-                if str(x.get("status", "")).lower() in ("out", "doubtful")
-                and (x.get("player") or {}).get("id") is not None}
-    except Exception:
-        return set()
-
 def build_player_projection_board(games, max_players_per_team=4):
     """Fetch slate rosters and player logs in bulk; optional context never blocks the board."""
     season = current_season_start()
