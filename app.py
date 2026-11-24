@@ -16,7 +16,7 @@ st.caption("NBA-only prediction lab · player projections · injuries · lineups
 if not api_key():
     st.warning("Connect your BALLDONTLIE API key to activate premium NBA data. Do not paste the key into chat.")
     st.markdown("[Create your BALLDONTLIE account](https://app.balldontlie.io/) · [API documentation](https://docs.balldontlie.io/)")
-    st.code('BALLDONTLIE_API_KEY = "YOUR_KEY"\nBALLDONTLIE_RPM = 5',language="toml")
+    st.code('BALLDONTLIE_API_KEY = "YOUR_KEY"\nBALLDONTLIE_RPM = 30',language="toml")
     st.stop()
 
 today=date.today().isoformat()
