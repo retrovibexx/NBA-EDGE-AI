@@ -15,17 +15,36 @@ def request(path,params=None,required=True):
     if not key:
         if required: raise RuntimeError("Add BALLDONTLIE_API_KEY in Streamlit Secrets to enable premium NBA data.")
         return {}
-    try: rpm=int(st.secrets.get("BALLDONTLIE_RPM",os.getenv("BALLDONTLIE_RPM","30")))
-    except Exception: rpm=int(os.getenv("BALLDONTLIE_RPM","5"))
+    try: rpm=int(st.secrets.get("BALLDONTLIE_RPM",os.getenv("BALLDONTLIE_RPM","10")))
+    except Exception: rpm=int(os.getenv("BALLDONTLIE_RPM","10"))
     rpm=max(1,min(rpm,600))
     with _rate_lock:
         wait=max(0.0,(60.0/rpm)-(time.monotonic()-_last_request))
         if wait: time.sleep(wait)
         _last_request=time.monotonic()
-    r=requests.get(BASE+path,headers={"Authorization":key},params=params or {},timeout=25)
-    if r.status_code==401: raise RuntimeError("API key rejected or endpoint not in plan. Confirm NBA GOAT access.")
-    if r.status_code==429: raise RuntimeError("Rate limit reached. Wait briefly and retry.")
-    r.raise_for_status(); return r.json()
+    # Retry transient provider throttling, honoring Retry-After when supplied.
+    for attempt in range(4):
+        r=requests.get(BASE+path,headers={"Authorization":key},params=params or {},timeout=25)
+        if r.status_code == 401:
+            raise RuntimeError("API key rejected or endpoint not in plan. Confirm your BALLDONTLIE NBA access.")
+        if r.status_code == 429:
+            detail=""
+            try:
+                body=r.json()
+                detail=str(body.get("error") or body.get("message") or body.get("errors") or "")
+            except Exception:
+                detail=r.text[:300]
+            retry_after=r.headers.get("Retry-After")
+            if attempt < 3:
+                try: delay=min(30.0,max(1.0,float(retry_after))) if retry_after else (2.0,5.0,12.0)[attempt]
+                except Exception: delay=(2.0,5.0,12.0)[attempt]
+                time.sleep(delay)
+                continue
+            hint=" Provider quota may be exhausted for this billing window." if any(x in detail.lower() for x in ("monthly","daily","quota","credits")) else " The provider is still throttling requests."
+            raise RuntimeError("BALLDONTLIE returned HTTP 429 after retries." + hint + (f" Details: {detail}" if detail else " Check your plan's request limit and usage dashboard."))
+        r.raise_for_status()
+        return r.json()
+    raise RuntimeError("BALLDONTLIE request failed after retries.")
 def pages(path,params=None,max_pages=8):
     params=dict(params or {}); params.setdefault("per_page",100); out=[]
     for _ in range(max_pages):
@@ -198,7 +217,7 @@ def player_game_stats_many(player_ids, season):
     rows = []
     # The BDL API encodes each player_ids[] item into the URL. Keep batches small
     # because a full NBA slate roster can exceed proxy request-line limits.
-    batch_size = 12
+    batch_size = 25
     for offset in range(0, len(ids), batch_size):
         batch = ids[offset:offset + batch_size]
         rows.extend(pages("/v1/stats", {"player_ids[]": batch, "seasons[]": int(season), "per_page": 100}, 30))
