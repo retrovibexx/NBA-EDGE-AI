@@ -7,7 +7,7 @@ def american_prob(odds):
         return (-o)/((-o)+100) if o<0 else 100/(o+100)
     except Exception: return None
 def analyze_props(game,props,max_players=35):
-    results=[]; seen=set()
+    results=[]; seen=set(); unique_players=set()
     for prop in props:
         pid=prop.get("player_id"); kind=prop.get("prop_type"); line=prop.get("line_value")
         stat=STAT_FOR_PROP.get(kind)
