@@ -45,7 +45,35 @@ def player_props(game_id): return request("/v2/odds/player_props",{"game_id":gam
 @st.cache_data(ttl=90,show_spinner=False)
 def game_odds(day): return pages("/v2/odds",{"dates[]":day,"per_page":100},3)
 @st.cache_data(ttl=21600,show_spinner=False)
-def search_players(name): return pages("/v1/players",{"search":name,"per_page":100},2)
+def search_players(name):
+    """Search by full name, then individual name tokens for provider search quirks."""
+    query = " ".join(str(name or "").split())
+    if not query:
+        return []
+    found = []
+    seen = set()
+    queries = [query]
+    parts = query.split()
+    if len(parts) > 1:
+        queries.extend(parts)
+    for term in queries:
+        try:
+            batch = pages("/v1/players", {"search": term, "per_page": 100}, 3)
+        except Exception:
+            continue
+        for player in batch:
+            pid = player.get("id")
+            if pid is not None and pid not in seen:
+                seen.add(pid)
+                found.append(player)
+    # Prefer results whose complete name contains all requested name tokens.
+    tokens = [x.casefold() for x in parts]
+    found.sort(key=lambda p: (
+        0 if all(t in f"{p.get('first_name','')} {p.get('last_name','')}".casefold() for t in tokens) else 1,
+        0 if p.get("is_active") else 1
+    ))
+    return found
+
 @st.cache_data(ttl=21600,show_spinner=False)
 def search_teams(query):
     """Search the small NBA team directory locally; no separate search endpoint required."""
