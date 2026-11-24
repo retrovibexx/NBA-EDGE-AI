@@ -19,7 +19,7 @@ def _team_rating(team):
         hs=g.get("home_team_score"); vs=g.get("visitor_team_score")
         if hs is None or vs is None: continue
         margins.append(float(hs-vs) if (g.get("home_team") or {}).get("id")==team["id"] else float(vs-hs))
-    return (float(np.mean(margins)) if margins else 0.0),len(margins)
+    last_date=completed[0].get("date") if completed else None\n    rest=None\n    if last_date:\n        try: rest=max(0,(date.today()-date.fromisoformat(last_date)).days-1)\n        except Exception: pass\n    return (float(np.mean(margins)) if margins else 0.0),len(margins),games,rest
 def predict_game(away,home,simulations=10000):
     if away.get("id")==home.get("id"): return {"error":"Choose two different teams."}
     try:
@@ -27,5 +27,5 @@ def predict_game(away,home,simulations=10000):
         margin=(hr-ar)+2.0
         rng=np.random.default_rng(42); sims=rng.normal(margin,12.0,int(simulations))
         hp=float(np.mean(sims>0)); total=float(np.clip(rng.normal(226,14,int(simulations)).mean(),180,275))
-        return {"away_win":1-hp,"home_win":hp,"home_margin":margin,"total":total,"away_score":(total-margin)/2,"home_score":(total+margin)/2,"away_form":ar,"home_form":hr,"away_games":an,"home_games":hn,"note":"Team recent scoring margin + home-court prior. This is a baseline until pace, efficiency, lineups and player availability are incorporated and backtested."}
+        return {"away_win":1-hp,"home_win":hp,"home_margin":margin,"total":total,"away_score":(total-margin)/2,"home_score":(total+margin)/2,"away_form":ar,"home_form":hr,"away_games":an,"home_games":hn,"away_rest_days":arest,"home_rest_days":hrest,"h2h_games":len(h2h),"note":"Team recent scoring margin + home-court prior. This is a baseline until pace, efficiency, lineups and player availability are incorporated and backtested."}
     except Exception as e: return {"error":f"Model error: {type(e).__name__}: {e}"}
