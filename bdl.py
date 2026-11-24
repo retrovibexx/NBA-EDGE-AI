@@ -141,3 +141,16 @@ def player_advanced_game_stats(player_id,season):
 @st.cache_data(ttl=21600,show_spinner=False)
 def all_player_season_averages(season):
     return pages("/nba/v1/season_averages/general",{"season":int(season),"season_type":"regular","type":"base","per_page":100},20)
+
+@st.cache_data(ttl=300,show_spinner=False)
+def player_game_lineup_status(game_id,player_id):
+    actual=game_lineups(int(game_id))
+    for row in actual:
+        if int((row.get("player") or {}).get("id",-1))==int(player_id):
+            return {"status":"Confirmed starter" if row.get("starter") else "Confirmed bench","source":"actual lineup","position":row.get("position")}
+    projected=projected_lineups(int(game_id))
+    for team_row in projected:
+        for item in team_row.get("lineup") or []:
+            if int((item.get("player") or {}).get("id",-1))==int(player_id):
+                return {"status":"Listed in projected lineup","source":str(team_row.get("status","projected")),"position":item.get("position")}
+    return {"status":"Not listed / unavailable feed","source":"No lineup match; this does not mean inactive","position":None}
