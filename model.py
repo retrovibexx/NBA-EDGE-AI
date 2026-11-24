@@ -68,8 +68,9 @@ def _injury_penalty(team_id):
 def predict_game(away,home,simulations=10000,target_date=None,exclude_game_id=None):
     if away.get("id")==home.get("id"): return {"error":"Choose two different teams."}
     try:
-        ar,an,ag,arest,anet,apace,aoff,adef,abase=_team_rating(away)
-        hr,hn,hg,hrest,hnet,hpace,hoff,hdef,hbase=_team_rating(home)
+        target_date=target_date or date.today().isoformat()
+        ar,an,ag,arest,anet,apace,aoff,adef,abase=_team_rating(away,target_date)
+        hr,hn,hg,hrest,hnet,hpace,hoff,hdef,hbase=_team_rating(home,target_date)
         rest_adj=0.0
         if arest==0: rest_adj-=1.0
         if hrest==0: rest_adj+=1.0
