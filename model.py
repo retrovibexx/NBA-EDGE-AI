@@ -1,7 +1,7 @@
 import numpy as np
 from datetime import date
-from bdl import current_season_start, team_games, player_game_stats, search_players, team_advanced_averages, team_base_averages, injuries, player_season_averages
-from features import player_rows, rolling_projection, minutes_projection
+from bdl import current_season_start, team_games, player_game_stats, search_players, team_advanced_averages, team_base_averages, injuries, player_season_averages, player_advanced_averages
+from features import player_rows, rolling_projection, minutes_projection, as_float, STAT_MAP
 
 def project_player(name,stat):
     matches=search_players(name)
@@ -11,7 +11,21 @@ def project_player(name,stat):
     if not rows: return {"error":"No player game logs returned for this season."}
     proj=rolling_projection(rows,stat)
     if not proj: return {"error":f"No usable {stat} records returned."}
-    return {"player":f"{exact.get('first_name','')} {exact.get('last_name','')}","team":(exact.get("team") or {}).get("abbreviation","—"),"projection":proj["projection"],"average":proj["mean"],"median":proj["median"],"last5":proj["last5"],"last10":proj["last10"],"games":proj["n"],"minutes":minutes_projection(rows),"values":proj["values"],"note":"Recency-weighted box-score projection; confirm current minutes, injuries, role and matchup before relying on it."}
+    minutes=minutes_projection(rows)
+    projection=proj["projection"]
+    if stat!="MIN" and minutes:
+        key=STAT_MAP.get(stat,stat.lower())
+        recent=rows[:min(10,len(rows))]
+        rates=[]
+        for row in recent:
+            value=as_float(row.get(key)); played=as_float(row.get("min"))
+            if np.isfinite(value) and np.isfinite(played) and played>0: rates.append(value/played)
+        if rates:
+            rate=float(np.mean(rates))
+            projection=.4*projection+.6*rate*minutes
+    advanced=player_advanced_averages(exact["id"],current_season_start())
+    adv=(advanced[0].get("stats") or {}) if advanced else {}
+    return {"player":f"{exact.get('first_name','')} {exact.get('last_name','')}","team":(exact.get("team") or {}).get("abbreviation","—"),"projection":projection,"average":proj["mean"],"median":proj["median"],"last5":proj["last5"],"last10":proj["last10"],"games":proj["n"],"minutes":minutes,"usage":adv.get("usage_percentage"),"values":proj["values"],"note":"Projection blends recent box-score output with per-minute production scaled by expected minutes. It still needs opponent, role and out-of-sample calibration."}
 
 def _team_rating(team):
     games=team_games(team["id"],current_season_start())
