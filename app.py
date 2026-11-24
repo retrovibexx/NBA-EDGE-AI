@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 from datetime import date
-from bdl import api_key, games_for_date, injuries, projected_lineups, player_props, game_odds, freshness_label
+from bdl import api_key, games_for_date, injuries, projected_lineups, game_lineups, player_props, game_odds, freshness_label
 from model import predict_game, project_player
 from prop_engine import analyze_props
 from parlays import build_candidates
@@ -129,6 +129,16 @@ with tabs[3]:
                     players=[{"Position":p.get("position"),"Player":f"{(p.get('player') or {}).get('first_name','')} {(p.get('player') or {}).get('last_name','')}"} for p in lu.get("lineup",[])]
                     st.dataframe(pd.DataFrame(players),use_container_width=True,hide_index=True)
             else: st.info("No projected lineup available yet. Missing does not mean confirmed inactive.")
+            st.markdown("**Actual starting lineup and bench**")
+            actual_lineups=game_lineups(lg["id"])
+            if actual_lineups:
+                actual_rows=[]
+                for item in actual_lineups:
+                    team_name=(item.get("team") or {}).get("full_name",str(item.get("team_id")))
+                    p=item.get("player") or {}
+                    actual_rows.append({"Team":team_name,"Player":f"{p.get('first_name','')} {p.get('last_name','')}","Starter":bool(item.get("starter")),"Position":item.get("position","")})
+                st.dataframe(pd.DataFrame(actual_rows),use_container_width=True,hide_index=True)
+            else: st.info("No official lineup records returned yet.")
         except Exception as e: st.error(f"Lineup feed unavailable: {e}")
 with tabs[4]:
     st.subheader("Automatic 3–6 leg parlay research")
@@ -184,6 +194,8 @@ with tabs[5]:
         if not prop_hist.empty:
             st.markdown("**Player prop predictions**")
             st.dataframe(prop_hist,use_container_width=True,hide_index=True)
+            graded_props=prop_hist[prop_hist["graded"]==1]
+            if len(graded_props): st.metric("Player prop hit rate",f"{graded_props.hit.mean():.1%}",f"{len(graded_props)} graded legs")
         if game_hist.empty and prop_hist.empty: st.info("Save predictions before games to start the record.")
     except Exception as e: st.error(f"History unavailable: {e}")
 with tabs[6]:
@@ -212,6 +224,6 @@ with tabs[7]:
     st.write(f"Schedule: {'Loaded' if games else 'No records returned'} · {today}")
     st.write("Injuries and lineups: BALLDONTLIE GOAT endpoints; always inspect status and updated_at.")
     st.write("Player props: live market snapshot. Provider notes that props are not historically stored and may disappear as games near completion.")
-    st.write("Team model: recent game margins and home-court prior. Pace/efficiency, role changes, player on/off impact and opponent positional defense remain planned model upgrades. A walk-forward player-stat backtest is available in the Backtesting tab.")
+    st.write("Team model: recent scoring margin, team pace/efficiency, home court, rest and a small head-to-head adjustment. Player on/off impact, role-change adjustments and opponent positional defense remain planned upgrades. Walk-forward player-stat backtesting is available in the Backtesting tab.")
     st.write("Cloud SQLite storage may reset on redeploy/restart. For durable season-long accuracy tracking, connect persistent Postgres.")
     st.caption("No model probability is a guarantee. Missing or stale data should reduce confidence, not be silently filled.")
