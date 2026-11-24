@@ -44,7 +44,7 @@ def analyze_props(game,props,max_players=35):
             away_id=(game.get("visitor_team") or {}).get("id")
             opponent_id=away_id if team_id==home_id else home_id if team_id==away_id else None
             matchup=None
-            if opponent_id is not None:
+            if opponent_id is not None and kind not in COMBO_KEYS:
                 try:
                     matchup=analyze_matchup(pid,opponent_id,stat,current_season_start())
                     if matchup and not matchup.get("error"):
