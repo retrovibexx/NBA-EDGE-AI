@@ -53,14 +53,18 @@ def analyze_props(game,props,max_players=35):
                         values=[float(v)+delta for v in values]
                 except Exception:
                     matchup=None
-            lineup_status=player_game_lineup_status(game["id"],pid)
+            # Lineup feeds are supplementary. A missing/unauthorized lineup endpoint must not
+            # discard an otherwise usable player prop candidate.
+            try:
+                lineup_status=player_game_lineup_status(game["id"],pid)
+            except Exception:
+                lineup_status={"status":"Lineup feed unavailable","source":"Optional endpoint unavailable"}
             over=empirical_over_probability(values,float(line))
             if over is None: continue
             market=prop.get("market") or {}
             op=american_prob(market.get("over_odds")); up=american_prob(market.get("under_odds"))
             if op is not None and up is not None and (op+up)>0:
                 fair_over=op/(op+up); fair_under=up/(op+up)
-                # Shrink small-sample hit rates toward the no-vig market baseline.
                 n=len(values); weight=n/(n+10.0)
                 over_est=weight*over+(1-weight)*fair_over
                 under_est=1-over_est
@@ -72,7 +76,20 @@ def analyze_props(game,props,max_players=35):
             probability=over_est if direction=="over" else 1-over_est
             edge=max(over_edge,under_edge)
             role_label=(matchup or {}).get("role",{}).get("label","Unavailable")
-            results.append({"game_id":game["id"],"player_id":pid,"player":f"{player.get('first_name','Player')} {player.get('last_name','')}","market":kind,"line":float(line),"direction":direction,"probability":float(probability),"projection":projection,"edge":float(edge),"vendor":prop.get("vendor",""),"updated_at":prop.get("updated_at"),"sample":len(values),"role_signal":role_label,"matchup_adjustment":round(float(matchup["adjusted_projection"])-float(matchup["base_projection"]),2) if matchup and not matchup.get("error") else None,"h2h_games":(matchup or {}).get("h2h_games",0),"position":(matchup or {}).get("position"),"positional_adjustment":(matchup or {}).get("positional_adjustment"),"lineup_status":lineup_status.get("status"),"lineup_source":lineup_status.get("source"),"weighted_teammate_pts_vacated":((matchup or {}).get("team_injury_vacancy") or {}).get("weighted_vacated",{}).get("pts"),"injured_teammates":", ".join(x.get("player","") for x in (matchup or {}).get("other_injured_teammates",[])),"source":"BALLDONTLIE player props + matchup-adjusted recent game logs"})
+            results.append({
+                "game_id":game["id"],"player_id":pid,
+                "player":f"{player.get('first_name','Player')} {player.get('last_name','')}",
+                "market":kind,"line":float(line),"direction":direction,"probability":float(probability),
+                "projection":projection,"edge":float(edge),"vendor":prop.get("vendor",""),
+                "updated_at":prop.get("updated_at"),"sample":len(values),"role_signal":role_label,
+                "matchup_adjustment":round(float(matchup["adjusted_projection"])-float(matchup["base_projection"]),2) if matchup and not matchup.get("error") else None,
+                "h2h_games":(matchup or {}).get("h2h_games",0),"position":(matchup or {}).get("position"),
+                "positional_adjustment":(matchup or {}).get("positional_adjustment"),
+                "lineup_status":lineup_status.get("status"),"lineup_source":lineup_status.get("source"),
+                "weighted_teammate_pts_vacated":((matchup or {}).get("team_injury_vacancy") or {}).get("weighted_vacated",{}).get("pts"),
+                "injured_teammates":", ".join(x.get("player","") for x in (matchup or {}).get("other_injured_teammates",[])),
+                "source":"BALLDONTLIE player props + matchup-adjusted recent game logs"
+            })
         except Exception:
             continue
     return sorted(results,key=lambda x:x["edge"],reverse=True)
