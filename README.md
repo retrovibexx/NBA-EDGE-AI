@@ -9,7 +9,11 @@ NBA-only analytics and prediction dashboard. Uses BALLDONTLIE as the primary dat
 - Sportsbook game odds and player props where provider coverage exists
 - Team recent-form, rest, head-to-head, pace, efficiency and injury-impact context
 - Monte Carlo game simulations
-- Candidate 3–6 leg parlay builder with same-game/player correlation exclusions
+- Opponent-aware player matchup analysis, head-to-head sample context and role/minutes trend signals
+- Matchup-adjusted player prop estimates with no-vig market shrinkage and sample-size context
+- Candidate 3–6 leg parlay builder with same-game/player exclusions and diversification scoring
+- Market snapshot journal for tracking your own player-prop line movement over time
+- Probability Brier scores for game and player-prop forecasts; CSV exports for prediction history
 - Prediction history, automatic result grading, hit-rate metrics and walk-forward player backtesting
 - Source freshness and API health visibility
 
@@ -30,6 +34,13 @@ Keep BALLDONTLIE_RPM at 5 during the GOAT trial. After the paid GOAT subscriptio
 
 ## Automated checks
 GitHub Actions runs the unit tests on pushes and pull requests. A separate hourly provider check runs when the repository Actions secret is configured. The Streamlit app refreshes data through provider-specific caches (roughly 90 seconds to 6 hours depending on the feed) and has a manual cache refresh.
+
+## Persistent prediction history (recommended)
+The app works with local SQLite by default. For durable history across Streamlit Cloud restarts, create a managed PostgreSQL database (for example, a Supabase Postgres project), copy its connection string, and add this to Streamlit Community Cloud → App → Settings → Secrets:
+
+    DATABASE_URL = "postgresql://USER:PASSWORD@HOST:5432/DATABASE"
+
+The app automatically switches to PostgreSQL when DATABASE_URL is present. Keep the database connection string private and never commit it to GitHub or paste it into chat. If DATABASE_URL is absent, the app uses local SQLite; hosted SQLite can reset on redeploy/restart. Market movement history starts when you capture snapshots in the Odds Movement tab; it is not a provider-supplied historical archive.
 
 ## Run
     pip install -r requirements.txt
