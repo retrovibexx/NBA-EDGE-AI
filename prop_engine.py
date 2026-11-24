@@ -80,20 +80,12 @@ def build_player_projection_board(games, max_players_per_team=4):
                     continue
                 values = [float(v) for v in proj["values"] if np.isfinite(v)]
                 key = {"PTS":"pts","REB":"reb","AST":"ast","3PM":"fg3m","STL":"stl","BLK":"blk"}[stat]
-                rates = []
-                for row in logs[:10]:
-                    value, played = as_float(row.get(key)), as_float(row.get("min"))
-                    if np.isfinite(value) and np.isfinite(played) and played > 0:
-                        rates.append(value / played)
+                # Keep the parlay board's player projection identical to the
+                # Player Projection Lab and walk-forward backtest.
+                # Role/minute changes are shown as context, not applied as an
+                # unvalidated multiplier to the forecast.
                 estimate = float(proj["projection"])
-                if rates:
-                    estimate = .55 * estimate + .45 * float(np.mean(rates)) * mins
                 defense, pace = context.get("def_rating", float("nan")), context.get("pace", float("nan"))
-                if np.isfinite(defense):
-                    estimate *= 1 + float(np.clip((defense - 112) * .0015, -.035, .035))
-                if np.isfinite(pace):
-                    estimate *= 1 + float(np.clip((pace - 100) * .001, -.025, .025))
-                estimate *= 1.025 if role_change >= 3 else (.975 if role_change <= -3 else 1.0)
                 board.append({
                     "game_id": game.get("id"),
                     "matchup": f"{(game.get('visitor_team') or {}).get('abbreviation','Away')} @ {(game.get('home_team') or {}).get('abbreviation','Home')}",
