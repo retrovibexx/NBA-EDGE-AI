@@ -15,9 +15,9 @@ def request(path,params=None,required=True):
     if not key:
         if required: raise RuntimeError("Add BALLDONTLIE_API_KEY in Streamlit Secrets to enable premium NBA data.")
         return {}
-    try: rpm=int(st.secrets.get("BALLDONTLIE_RPM",os.getenv("BALLDONTLIE_RPM","10")))
+    try: rpm=int(st.secrets.get("BALLDONTLIE_RPM",os.getenv("BALLDONTLIE_RPM","5")))
     except Exception: rpm=int(os.getenv("BALLDONTLIE_RPM","10"))
-    rpm=max(1,min(rpm,8))
+    rpm=max(1,min(rpm,5))
     with _rate_lock:
         wait=max(0.0,(60.0/rpm)-(time.monotonic()-_last_request))
         if wait: time.sleep(wait)
