@@ -1,13 +1,13 @@
 import numpy as np
 import pandas as pd
-from bdl import search_players, player_game_stats, current_season_start
+from bdl import search_players, player_game_history, current_season_start
 from features import player_rows, rolling_projection, STAT_MAP, as_float
 
 def player_walk_forward(name,stat,max_games=60,history=10):
     matches=search_players(name)
     if not matches: return None,"Player not found."
     exact=next((p for p in matches if f"{p.get('first_name','')} {p.get('last_name','')}".strip().lower()==name.lower()),matches[0])
-    rows=player_rows(player_game_stats(exact["id"],current_season_start()))
+    rows=player_rows(player_game_history(exact["id"],current_season_start()))
     key=STAT_MAP.get(stat,stat.lower())
     chronological=list(reversed(rows))
     observations=[]
