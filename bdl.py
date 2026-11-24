@@ -159,3 +159,13 @@ def player_game_lineup_status(game_id,player_id):
 @st.cache_data(ttl=21600,show_spinner=False)
 def players_for_team(team_id):
     return pages('/v1/players', {'team_ids[]': int(team_id), 'per_page': 100}, 3)
+
+
+@st.cache_data(ttl=1800,show_spinner=False)
+def player_game_stats_many(player_ids, season):
+    ids = sorted({int(x) for x in player_ids if x is not None})
+    if not ids:
+        return []
+    rows = pages("/v1/stats", {"player_ids[]": ids, "seasons[]": int(season), "per_page": 100}, 30)
+    rows.sort(key=lambda x: (x.get("game") or {}).get("date", ""), reverse=True)
+    return rows
