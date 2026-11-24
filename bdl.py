@@ -13,20 +13,19 @@ def request(path,params=None,required=True):
     global _last_request
     key=api_key()
     if not key:
-        if required: raise RuntimeError("Add BALLDONTLIE_API_KEY in Streamlit Secrets to enable premium NBA data.")
+        if required: raise RuntimeError("Add BALLDONTLIE_API_KEY in Streamlit Secrets to enable NBA data.")
         return {}
     try: rpm=int(st.secrets.get("BALLDONTLIE_RPM",os.getenv("BALLDONTLIE_RPM","5")))
-    except Exception: rpm=int(os.getenv("BALLDONTLIE_RPM","10"))
+    except Exception: rpm=5
     rpm=max(1,min(rpm,5))
-    with _rate_lock:
-        wait=max(0.0,(60.0/rpm)-(time.monotonic()-_last_request))
-        if wait: time.sleep(wait)
-        _last_request=time.monotonic()
-    # Retry transient provider throttling, honoring Retry-After when supplied.
     for attempt in range(4):
+        with _rate_lock:
+            wait=max(0.0,(60.0/rpm)-(time.monotonic()-_last_request))
+            if wait: time.sleep(wait)
+            _last_request=time.monotonic()
         r=requests.get(BASE+path,headers={"Authorization":key},params=params or {},timeout=25)
         if r.status_code == 401:
-            raise RuntimeError("API key rejected or endpoint not in plan. Confirm your BALLDONTLIE NBA access.")
+            raise RuntimeError("API key rejected or endpoint not included in your BALLDONTLIE plan.")
         if r.status_code == 429:
             detail=""
             try:
@@ -34,25 +33,17 @@ def request(path,params=None,required=True):
                 detail=str(body.get("error") or body.get("message") or body.get("errors") or "")
             except Exception:
                 detail=r.text[:300]
-            retry_after=r.headers.get("Retry-After")
             if attempt < 3:
-                try: delay=min(30.0,max(1.0,float(retry_after))) if retry_after else (2.0,5.0,12.0)[attempt]
-                except Exception: delay=(2.0,5.0,12.0)[attempt]
+                retry_after=r.headers.get("Retry-After")
+                try: delay=min(60.0,max(1.0,float(retry_after))) if retry_after else (15.0,30.0,60.0)[attempt]
+                except Exception: delay=(15.0,30.0,60.0)[attempt]
                 time.sleep(delay)
                 continue
-            hint=" Provider quota may be exhausted for this billing window." if any(x in detail.lower() for x in ("monthly","daily","quota","credits")) else " The provider is still throttling requests."
-            raise RuntimeError("BALLDONTLIE returned HTTP 429 after retries." + hint + (f" Details: {detail}" if detail else " Check your plan's request limit and usage dashboard."))
+            hint=" Provider quota may be exhausted for this billing window." if any(x in detail.lower() for x in ("monthly","daily","quota","credits")) else " Provider continues to throttle requests."
+            raise RuntimeError("BALLDONTLIE HTTP 429 after retries." + hint + (f" Details: {detail}" if detail else " Check provider usage and plan limits."))
         r.raise_for_status()
         return r.json()
     raise RuntimeError("BALLDONTLIE request failed after retries.")
-def pages(path,params=None,max_pages=8):
-    params=dict(params or {}); params.setdefault("per_page",100); out=[]
-    for _ in range(max_pages):
-        payload=request(path,params); out.extend(payload.get("data",[]))
-        cursor=payload.get("meta",{}).get("next_cursor")
-        if cursor is None: break
-        params["cursor"]=cursor; time.sleep(.12)
-    return out
 @st.cache_data(ttl=180,show_spinner=False)
 def games_for_date(day): return pages("/v1/games",{"dates[]":day,"per_page":100})
 @st.cache_data(ttl=900,show_spinner=False)
@@ -210,20 +201,15 @@ def players_for_team(team_id):
 
 @st.cache_data(ttl=1800,show_spinner=False)
 def player_game_stats_many(player_ids, season):
-    """Fetch player logs in small URL-safe batches to avoid HTTP 431 header/request-line errors."""
+    """Fetch compact recent samples while bounding API calls for 5 RPM plans."""
     ids = sorted({int(x) for x in player_ids if x is not None})
-    if not ids:
-        return []
+    if not ids: return []
     rows = []
-    # The BDL API encodes each player_ids[] item into the URL. Keep batches small
-    # because a full NBA slate roster can exceed proxy request-line limits.
-    batch_size = 25
-    for offset in range(0, len(ids), batch_size):
-        batch = ids[offset:offset + batch_size]
-        rows.extend(pages("/v1/stats", {"player_ids[]": batch, "seasons[]": int(season), "per_page": 100}, 30))
+    for offset in range(0, len(ids), 50):
+        batch = ids[offset:offset + 50]
+        rows.extend(pages("/v1/stats", {"player_ids[]": batch, "seasons[]": int(season), "per_page": 100}, 2))
     rows.sort(key=lambda x: (x.get("game") or {}).get("date", ""), reverse=True)
     return rows
-
 @st.cache_data(ttl=21600,show_spinner=False)
 def players_for_teams(team_ids):
     ids = sorted({int(x) for x in team_ids if x is not None})
