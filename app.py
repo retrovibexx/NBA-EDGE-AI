@@ -160,7 +160,7 @@ with tabs[4]:
                     board=build_player_projection_board(games)
                     st.session_state['model_player_board']=board
                     st.session_state['model_auto_legs']=build_model_legs(board)
-                    if board: st.success(f'Built {len(board)} player-stat projections and {len(st.session_state["model_prop_legs"])} model-generated legs.')
+                    if board: st.success(f'Built {len(board)} player-stat projections and {len(st.session_state["model_auto_legs"])} model-generated legs.')
                     else: st.warning('No player projections returned. Check Data Health and player/team game-log access.')
                 except Exception as e: st.error(f'Projection board failed: {type(e).__name__}: {e}')
     if st.session_state.get('model_auto_legs'):
