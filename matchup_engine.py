@@ -6,7 +6,7 @@ splits, not causal player value; position splits are recent opponent production 
 import numpy as np
 import streamlit as st
 from bdl import (
-    player_game_history, team_advanced_averages, current_season_start, injuries,
+    player_game_history, team_advanced_averages, current_season_start, injuries, player_season_averages,
     team_games_history, team_lineup_stats, team_box_scores, player_advanced_game_stats, all_player_season_averages,
 )
 from features import player_rows, STAT_MAP, as_float, rolling_projection, minutes_projection
@@ -53,6 +53,32 @@ def detect_role_change(rows):
     elif use_change is not None and use_change<=-2: label="Usage trending down"
     else: label="Stable rotation"
     return {"label":label,"minutes_change":change,"recent_minutes":recent_min,"prior_minutes":prior_min,"usage_change":use_change}
+
+@st.cache_data(ttl=1800,show_spinner=False)
+def _team_injury_vacancy(team_id,season):
+    rows=injuries()
+    weights={"out":1.0,"doubtful":0.75,"questionable":0.35,"probable":0.10}
+    relevant=[]
+    for item in rows:
+        player=item.get("player") or {}
+        status=str(item.get("status") or "").lower()
+        if player.get("team_id")==int(team_id) and status in weights and player.get("id") is not None:
+            relevant.append((player,item,weights[status]))
+    ids=[p[0]["id"] for p in relevant]
+    averages=player_season_averages(ids,int(season)) if ids else []
+    by_id={((x.get("player") or {}).get("id")):_stats(x) for x in averages}
+    totals={k:0.0 for k in ("pts","reb","ast","min")}
+    details=[]
+    for player,item,weight in relevant:
+        stats=by_id.get(player["id"],{})
+        row={"player":f"{player.get('first_name','')} {player.get('last_name','')}".strip(),"status":item.get("status"),"weight":weight}
+        for key in totals:
+            value=_finite(stats.get(key))
+            if value is not None:
+                row[key]=value
+                totals[key]+=value*weight
+        details.append(row)
+    return {"weighted_vacated":totals,"players":details,"count":len(details)}
 
 @st.cache_data(ttl=1800,show_spinner=False)
 def _lineup_impact(team_id,player_id,season):
@@ -192,8 +218,8 @@ def analyze_matchup(player_id,opponent_id,stat="PTS",season=None,include_full=Tr
         "base_projection":float(base["projection"]),"adjusted_projection":float(max(0,base["projection"]+adjustment)),
         "opponent_def_rating":defense,"opponent_pace":pace,"h2h_mean":h2h_mean,"h2h_games":len(h2h),
         "role":role,"role_adjustment":float(adjustment),"sample":base["n"],"position":position,
-        "positional_defense":pos_context,"positional_baseline_per36":pos_baseline,"positional_adjustment":float(pos_adjustment),"lineup_impact":lineup,"advanced":advanced,
-        "note":"Projection combines opponent team rating, recent position-specific box-score allowance relative to league positional production, H2H and role trends. Lineup on/off and advanced player rates are also shown. Position splits and on/off are sample-dependent descriptive signals, not causal guarantees."
+        "positional_defense":pos_context,"positional_baseline_per36":pos_baseline,"positional_adjustment":float(pos_adjustment),"lineup_impact":lineup,"advanced":advanced,"team_injury_vacancy":vacancy,"other_injured_teammates":vacancy_players,
+        "note":"Projection combines opponent team rating, recent position-specific box-score allowance relative to league positional production, H2H and role trends. Teammate injury vacancy, lineup on/off and advanced player rates are shown as context. Position splits and on/off are sample-dependent descriptive signals, not causal guarantees."
     }
 
 def team_injury_context(team_id):
