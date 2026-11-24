@@ -1,6 +1,6 @@
 import numpy as np
 from datetime import date
-from bdl import current_season_start, team_games, player_game_stats, search_players, team_advanced_averages, injuries, player_season_averages, player_advanced_averages, team_games_history
+from bdl import current_season_start, team_games, player_game_stats, player_game_history, search_players, team_advanced_averages, injuries, player_season_averages, player_advanced_averages, team_games_history
 from features import player_rows, rolling_projection, minutes_projection, as_float, STAT_MAP
 
 
@@ -51,6 +51,8 @@ def project_player(name, stat):
         return {"error": "Player not found in data provider."}
     exact = next((p for p in matches if f"{p.get('first_name', '')} {p.get('last_name', '')}".strip().lower() == name.lower()), matches[0])
     rows = player_rows(player_game_stats(exact["id"], current_season_start()))
+    if len(rows) < 5:
+        rows = player_rows(player_game_history(exact["id"], current_season_start()))
     if not rows:
         return {"error": "No player game logs returned for this season."}
     proj = rolling_projection(rows, stat)
@@ -88,7 +90,12 @@ def project_player(name, stat):
 
 
 def _team_rating(team, target_date):
-    games = team_games(team["id"], current_season_start())
+    try:
+        games = team_games(team["id"], current_season_start())
+        if not games:
+            games = team_games_history(team["id"], current_season_start())
+    except Exception:
+        games = team_games_history(team["id"], current_season_start())
     completed = [
         g for g in games
         if (g.get("status_state") == "final" or str(g.get("status", "")).lower() == "final")
@@ -128,8 +135,11 @@ def predict_game(away, home, simulations=10000, target_date=None, exclude_game_i
             rest_adj -= 1.0
         if hrest == 0:
             rest_adj += 1.0
-        away_history = team_games_history(away["id"], current_season_start())
-        home_history = team_games_history(home["id"], current_season_start())
+        try:
+            away_history = team_games_history(away["id"], current_season_start())
+            home_history = team_games_history(home["id"], current_season_start())
+        except Exception:
+            away_history, home_history = [], []
         away_by_id = {g.get("id"): g for g in away_history}
         home_by_id = {g.get("id"): g for g in home_history}
         meetings = [
