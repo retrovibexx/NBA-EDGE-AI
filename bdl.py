@@ -137,3 +137,7 @@ def player_matchup_defense(player_id,game_ids):
 @st.cache_data(ttl=21600,show_spinner=False)
 def player_advanced_game_stats(player_id,season):
     return pages("/nba/v2/stats/advanced",{"player_ids[]":int(player_id),"seasons[]":int(season),"period":0,"per_page":100},12)
+
+@st.cache_data(ttl=21600,show_spinner=False)
+def all_player_season_averages(season):
+    return pages("/nba/v1/season_averages/general",{"season":int(season),"season_type":"regular","type":"base","per_page":100},20)
