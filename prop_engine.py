@@ -6,6 +6,14 @@ from features import player_rows, rolling_projection, empirical_over_probability
 
 PROP_STATS = ["PTS", "REB", "AST", "3PM", "STL", "BLK"]
 
+def american_prob(odds):
+    """Backwards-compatible American-odds conversion helper."""
+    try:
+        value = float(odds)
+        return (-value) / ((-value) + 100) if value < 0 else 100 / (value + 100)
+    except (TypeError, ValueError, ZeroDivisionError):
+        return None
+
 def _optional_opponent_context(team_id, season):
     try:
         rows = team_advanced_averages(int(team_id), int(season))
