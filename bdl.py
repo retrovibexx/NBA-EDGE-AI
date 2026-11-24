@@ -46,6 +46,13 @@ def player_props(game_id): return request("/v2/odds/player_props",{"game_id":gam
 def game_odds(day): return pages("/v2/odds",{"dates[]":day,"per_page":100},3)
 @st.cache_data(ttl=21600,show_spinner=False)
 def search_players(name): return pages("/v1/players",{"search":name,"per_page":100},2)
+@st.cache_data(ttl=21600,show_spinner=False)
+def search_teams(query):
+    """Search the small NBA team directory locally; no separate search endpoint required."""
+    all_teams=pages("/v1/teams",{"per_page":100},1)
+    q=str(query or "").strip().casefold()
+    if not q: return all_teams
+    return [team for team in all_teams if q in " ".join(str(team.get(k,"")) for k in ("full_name","name","abbreviation","city","conference","division")).casefold()]
 @st.cache_data(ttl=1800,show_spinner=False)
 def player_game_stats(player_id,season):
     rows=pages("/v1/stats",{"player_ids[]":player_id,"seasons[]":season,"per_page":100},12)
