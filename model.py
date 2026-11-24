@@ -97,9 +97,13 @@ def predict_game(away,home,simulations=10000,target_date=None,exclude_game_id=No
         hp=float(np.mean(sims>0))
         pace_values=[float(x) for x in (apace,hpace) if x is not None]
         pace_factor=float(np.mean(pace_values)) if pace_values else 100.0
-        offense_values=[float(x) for x in (aoff,hoff) if x is not None]
-        efficiency_factor=float(np.mean(offense_values)) if offense_values else 112.0
-        projected_total=float(np.clip(2*pace_factor*efficiency_factor/100,185,255))
+        if all(x is not None for x in (aoff,hoff,adef,hdef)):
+            projected_total=pace_factor*((float(aoff)+float(hdef))+(float(hoff)+float(adef)))/200
+        else:
+            offense_values=[float(x) for x in (aoff,hoff) if x is not None]
+            efficiency_factor=float(np.mean(offense_values)) if offense_values else 112.0
+            projected_total=2*pace_factor*efficiency_factor/100
+        projected_total=float(np.clip(projected_total,185,255))
         total=float(np.clip(rng.normal(projected_total,14,int(simulations)).mean(),180,275))
         return {"away_win":1-hp,"home_win":hp,"home_margin":margin,"total":total,"away_score":(total-margin)/2,"home_score":(total+margin)/2,"away_form":ar,"home_form":hr,"away_games":an,"home_games":hn,"away_rest_days":arest,"home_rest_days":hrest,"h2h_games":len(h2h),"away_pace":apace,"home_pace":hpace,"away_net_rating":anet,"home_net_rating":hnet,"away_injury_penalty":away_injury,"home_injury_penalty":home_injury,"away_injured_count":away_injured_count,"home_injured_count":home_injured_count,"note":"Team recent scoring margin + home-court prior + modest rest and head-to-head adjustments. Pace/efficiency and player-level availability still need calibration and historical testing."}
     except Exception as e:
