@@ -1,95 +1,68 @@
+"""Model-only player prop research. No sportsbook odds or live prop feed required."""
 import numpy as np
-from bdl import player_game_stats, current_season_start, player_by_id, player_game_lineup_status
+from bdl import player_game_stats, current_season_start, players_for_team
 from features import player_rows, rolling_projection, empirical_over_probability, as_float
-from matchup_engine import analyze_matchup
 
-STAT_FOR_PROP={"points":"PTS","rebounds":"REB","assists":"AST","steals":"STL","blocks":"BLK","threes":"3PM","points_rebounds":"PTS","points_assists":"PTS","points_rebounds_assists":"PTS","rebounds_assists":"REB"}
-COMBO_KEYS={"points_rebounds":["pts","reb"],"points_assists":["pts","ast"],"points_rebounds_assists":["pts","reb","ast"],"rebounds_assists":["reb","ast"]}
+PROP_STATS = ["PTS", "REB", "AST", "3PM", "STL", "BLK"]
 
-def american_prob(odds):
-    try:
-        o=float(odds)
-        return (-o)/((-o)+100) if o<0 else 100/(o+100)
-    except Exception:
-        return None
+def build_player_projection_board(games, max_players_per_team=12):
+    board, seen = [], set()
+    for game in games:
+        home, away = game.get("home_team") or {}, game.get("visitor_team") or {}
+        for team, opponent in ((home, away), (away, home)):
+            if not team.get("id"): continue
+            try: roster = players_for_team(team["id"])
+            except Exception: continue
+            eligible = []
+            for player in roster:
+                pid = player.get("id")
+                if not pid or pid in seen or player.get("is_active") is False: continue
+                try: logs = player_rows(player_game_stats(pid, current_season_start()))
+                except Exception: continue
+                if len(logs) < 5: continue
+                mins = [as_float(r.get("min")) for r in logs[:10]]
+                mins = [x for x in mins if np.isfinite(x) and x > 0]
+                if not mins: continue
+                minutes = float(np.mean(mins))
+                if minutes >= 8: eligible.append((minutes, player, logs))
+            eligible.sort(key=lambda x: x[0], reverse=True)
+            for minutes, player, logs in eligible[:max_players_per_team]:
+                seen.add(player["id"])
+                for stat in PROP_STATS:
+                    proj = rolling_projection(logs, stat)
+                    if not proj or proj["n"] < 5: continue
+                    values = [float(v) for v in proj["values"] if np.isfinite(v)]
+                    board.append({
+                        "game_id": game.get("id"),
+                        "matchup": f"{away.get('abbreviation','Away')} @ {home.get('abbreviation','Home')}",
+                        "player_id": player["id"],
+                        "player": (player.get("first_name","") + " " + player.get("last_name","")).strip(),
+                        "team": team.get("abbreviation",""),
+                        "opponent": opponent.get("abbreviation",""),
+                        "market": stat,
+                        "projection": round(float(proj["projection"]), 2),
+                        "last5": round(float(proj["last5"]), 2),
+                        "last10": round(float(proj["last10"]), 2),
+                        "minutes": round(minutes, 1),
+                        "sample": len(values),
+                        "line": None,
+                        "_values": values
+                    })
+    return sorted(board, key=lambda x: (x["minutes"], x["sample"]), reverse=True)
 
-def analyze_props(game,props,max_players=35):
-    results=[]; seen=set(); unique_players=set()
-    for prop in props:
-        pid=prop.get("player_id"); kind=prop.get("prop_type"); line=prop.get("line_value")
-        stat=STAT_FOR_PROP.get(kind)
-        if not pid or not stat or line is None: continue
-        marker=(pid,kind,str(line),prop.get("vendor"))
-        if marker in seen: continue
-        seen.add(marker); unique_players.add(pid)
-        if len(unique_players)>max_players: break
-        try:
-            logs=player_rows(player_game_stats(pid,current_season_start()))
-            if not logs: continue
-            if kind in COMBO_KEYS:
-                values=[]
-                for row in logs:
-                    vals=[as_float(row.get(k)) for k in COMBO_KEYS[kind]]
-                    if all(np.isfinite(v) for v in vals): values.append(sum(vals))
-                values=values[:15]
-                if len(values)<3: continue
-                projection=float(np.average(values,weights=np.linspace(1.7,.75,len(values))))
-            else:
-                proj=rolling_projection(logs,stat)
-                if not proj: continue
-                values=proj["values"]; projection=float(proj["projection"])
-            player=prop.get("player") or player_by_id(pid)
-            team_id=(player.get("team") or {}).get("id")
-            home_id=(game.get("home_team") or {}).get("id")
-            away_id=(game.get("visitor_team") or {}).get("id")
-            opponent_id=away_id if team_id==home_id else home_id if team_id==away_id else None
-            matchup=None
-            if opponent_id is not None and kind not in COMBO_KEYS:
-                try:
-                    matchup=analyze_matchup(pid,opponent_id,stat,current_season_start(),include_full=False)
-                    if matchup and not matchup.get("error"):
-                        delta=float(matchup["adjusted_projection"])-float(matchup["base_projection"])
-                        projection=max(0.0,projection+delta)
-                        values=[float(v)+delta for v in values]
-                except Exception:
-                    matchup=None
-            # Lineup feeds are supplementary. A missing/unauthorized lineup endpoint must not
-            # discard an otherwise usable player prop candidate.
-            try:
-                lineup_status=player_game_lineup_status(game["id"],pid)
-            except Exception:
-                lineup_status={"status":"Lineup feed unavailable","source":"Optional endpoint unavailable"}
-            over=empirical_over_probability(values,float(line))
-            if over is None: continue
-            market=prop.get("market") or {}
-            op=american_prob(market.get("over_odds")); up=american_prob(market.get("under_odds"))
-            if op is not None and up is not None and (op+up)>0:
-                fair_over=op/(op+up); fair_under=up/(op+up)
-                n=len(values); weight=n/(n+10.0)
-                over_est=weight*over+(1-weight)*fair_over
-                under_est=1-over_est
-                over_edge=over_est-fair_over; under_edge=under_est-fair_under
-            else:
-                over_est=over
-                over_edge=under_edge=0.0
-            direction="over" if over_edge>=under_edge else "under"
-            probability=over_est if direction=="over" else 1-over_est
-            edge=max(over_edge,under_edge)
-            role_label=(matchup or {}).get("role",{}).get("label","Unavailable")
-            results.append({
-                "game_id":game["id"],"player_id":pid,
-                "player":f"{player.get('first_name','Player')} {player.get('last_name','')}",
-                "market":kind,"line":float(line),"direction":direction,"probability":float(probability),
-                "projection":projection,"edge":float(edge),"vendor":prop.get("vendor",""),
-                "updated_at":prop.get("updated_at"),"sample":len(values),"role_signal":role_label,
-                "matchup_adjustment":round(float(matchup["adjusted_projection"])-float(matchup["base_projection"]),2) if matchup and not matchup.get("error") else None,
-                "h2h_games":(matchup or {}).get("h2h_games",0),"position":(matchup or {}).get("position"),
-                "positional_adjustment":(matchup or {}).get("positional_adjustment"),
-                "lineup_status":lineup_status.get("status"),"lineup_source":lineup_status.get("source"),
-                "weighted_teammate_pts_vacated":((matchup or {}).get("team_injury_vacancy") or {}).get("weighted_vacated",{}).get("pts"),
-                "injured_teammates":", ".join(x.get("player","") for x in (matchup or {}).get("other_injured_teammates",[])),
-                "source":"BALLDONTLIE player props + matchup-adjusted recent game logs"
-            })
-        except Exception:
-            continue
-    return sorted(results,key=lambda x:x["edge"],reverse=True)
+def evaluate_manual_lines(board):
+    evaluated = []
+    for row in board:
+        try: line = float(row.get("line"))
+        except (TypeError, ValueError): continue
+        values = row.get("_values") or []
+        over = empirical_over_probability(values, line)
+        if over is None: continue
+        direction = "over" if over >= 0.5 else "under"
+        probability = over if direction == "over" else 1 - over
+        item = {k:v for k,v in row.items() if not k.startswith("_")}
+        item.update({"line": line, "direction": direction, "probability": float(probability),
+                     "edge": abs(float(probability)-0.5),
+                     "source": "Recent NBA game logs; user-entered sportsbook line"})
+        evaluated.append(item)
+    return sorted(evaluated, key=lambda x: x["edge"], reverse=True)
