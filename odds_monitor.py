@@ -3,6 +3,12 @@ from datetime import datetime, timezone
 from sqlalchemy import text
 from storage import get_engine
 
+def _number(value):
+    try:
+        return float(value) if value is not None and value != "" else None
+    except (TypeError, ValueError):
+        return None
+
 def init_odds_db():
     engine=get_engine()
     with engine.begin() as c:
@@ -20,13 +26,15 @@ def init_odds_db():
 
 def record_snapshot(game_id, props=None, game_odds=None):
     init_odds_db()
-    now=datetime.now(timezone.utc).isoformat()
+    now=datetime.now(timezone.utc)
+    engine=get_engine()
+    captured=now if engine.dialect.name=="postgresql" else now.isoformat()
     count=0
-    with get_engine().begin() as c:
+    with engine.begin() as c:
         for item in (game_odds or []):
             c.execute(text("""INSERT INTO odds_snapshots(captured_at,game_id,line,over_odds,under_odds,vendor,snapshot_type)
                 VALUES(:captured_at,:game_id,:line,:over,:under,:vendor,'game')"""),{
-                "captured_at":now,"game_id":game_id,"line":item.get("total_value"),
+                "captured_at":captured,"game_id":game_id,"line":_number(item.get("total_value")),
                 "over":None,"under":None,"vendor":item.get("vendor")})
             count+=1
         for item in (props or []):
@@ -35,10 +43,10 @@ def record_snapshot(game_id, props=None, game_odds=None):
             except (TypeError,ValueError): continue
             c.execute(text("""INSERT INTO odds_snapshots(captured_at,game_id,player_id,player,market,line,over_odds,under_odds,vendor,snapshot_type)
                 VALUES(:captured_at,:game_id,:player_id,:player,:market,:line,:over,:under,:vendor,'player_prop')"""),{
-                "captured_at":now,"game_id":game_id,"player_id":item.get("player_id"),
+                "captured_at":captured,"game_id":game_id,"player_id":item.get("player_id"),
                 "player":f"{player.get('first_name','')} {player.get('last_name','')}".strip(),
-                "market":item.get("prop_type"),"line":line,"over":market.get("over_odds"),
-                "under":market.get("under_odds"),"vendor":item.get("vendor")})
+                "market":item.get("prop_type"),"line":line,"over":_number(market.get("over_odds")),
+                "under":_number(market.get("under_odds")),"vendor":item.get("vendor")})
             count+=1
     return count
 
