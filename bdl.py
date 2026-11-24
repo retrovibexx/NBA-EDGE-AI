@@ -74,3 +74,9 @@ def team_base_averages(team_id,season):
 @st.cache_data(ttl=300,show_spinner=False)
 def game_lineups(game_id):
     return pages("/nba/v1/lineups",{"game_ids[]":int(game_id),"per_page":100},2)
+
+@st.cache_data(ttl=900,show_spinner=False)
+def player_season_averages(player_ids,season):
+    ids=[int(x) for x in player_ids if x is not None]
+    if not ids: return []
+    return pages("/nba/v1/season_averages/general",{"season":season,"season_type":"regular","type":"base","player_ids[]":ids,"per_page":100},3)
