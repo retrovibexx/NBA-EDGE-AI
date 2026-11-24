@@ -24,8 +24,9 @@ Trial note: BALLDONTLIE states GOAT trial requests are limited to 5 requests/min
 In Streamlit Community Cloud → App → Settings → Secrets, add:
 
     BALLDONTLIE_API_KEY = "paste_your_key_here"
+    BALLDONTLIE_RPM = 5
 
-Never commit a real API key to GitHub or paste it into chat. If you want the hourly GitHub Actions provider check, also add a repository Actions secret named BALLDONTLIE_API_KEY under Settings → Secrets and variables → Actions.
+Keep BALLDONTLIE_RPM at 5 during the GOAT trial. After the paid GOAT subscription is active, change it to 600 to use the published paid rate limit. Never commit a real API key to GitHub or paste it into chat. If you want the hourly GitHub Actions provider check, also add a repository Actions secret named BALLDONTLIE_API_KEY under Settings → Secrets and variables → Actions.
 
 ## Automated checks
 GitHub Actions runs the unit tests on pushes and pull requests. A separate hourly provider check runs when the repository Actions secret is configured. The Streamlit app refreshes data through provider-specific caches (roughly 90 seconds to 6 hours depending on the feed) and has a manual cache refresh.
