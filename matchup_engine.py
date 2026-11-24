@@ -202,7 +202,10 @@ def analyze_matchup(player_id,opponent_id,stat="PTS",season=None,include_full=Tr
     if role["minutes_change"] is not None:
         delta_min=float(np.clip(role["minutes_change"]*0.20,-2.5,2.5))
         adjustment+=delta_min if stat=="MIN" else delta_min*(base["projection"]/max(1.0,minutes or 1.0))
-    pos_context=_positional_defense(int(opponent_id),position,season) if position else None
+    try:
+        pos_context=_positional_defense(int(opponent_id),position,season) if position else None
+    except Exception:
+        pos_context=None
     pos_adjustment=0.0
     pos_baseline=None
     if pos_context and stat!="MIN":
