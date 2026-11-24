@@ -1,98 +1,176 @@
-"""Opponent-aware player context and rotation-change signals.
+"""Player matchup model using NBA player logs, lineup performance and position-specific opponent box scores.
 
-These are transparent, sample-size-shrunk adjustments, not trained causal estimates.
+All context adjustments are bounded and sample-size shrunk. On/off ratings are descriptive team-lineup
+splits, not causal player value; position splits are recent opponent production allowed per 36.
 """
 import numpy as np
 import streamlit as st
-from bdl import player_game_history, team_advanced_averages, current_season_start, injuries, player_season_averages
+from bdl import (
+    player_game_history, team_advanced_averages, current_season_start, injuries,
+    team_games_history, team_lineup_stats, team_box_scores, player_advanced_game_stats,
+)
 from features import player_rows, STAT_MAP, as_float, rolling_projection, minutes_projection
 
-def _stat_key(stat):
-    return STAT_MAP.get(stat, str(stat).lower())
+COMBO_STATS = {
+    "PTS":"pts","REB":"reb","AST":"ast","STL":"stl","BLK":"blk","MIN":"min","3PM":"fg3m"
+}
 
-@st.cache_data(ttl=1800, show_spinner=False)
-def analyze_matchup(player_id, opponent_id, stat="PTS", season=None):
-    season = int(season or current_season_start())
-    raw = player_game_history(int(player_id), season)
-    rows = player_rows(raw)
-    if len(rows) < 5:
-        return {"error":"Not enough player game logs for matchup analysis."}
-    key = _stat_key(stat)
-    base = rolling_projection(rows, stat)
-    if not base:
-        return {"error":f"No usable {stat} history."}
-    h2h = []
-    for row in rows:
-        game = next((x.get("game") or {} for x in raw if (x.get("game") or {}).get("id")==row.get("game_id")), {})
-        home_id = (game.get("home_team") or {}).get("id")
-        away_id = (game.get("visitor_team") or {}).get("id")
-        if int(opponent_id) in (home_id, away_id):
-            value = as_float(row.get(key))
-            if np.isfinite(value): h2h.append(value)
-    h2h = h2h[:8]
-    # Opponent team-level defensive efficiency is used as a light contextual signal.
-    adv = team_advanced_averages(int(opponent_id), season)
-    stats = (adv[0].get("stats") or {}) if adv else {}
-    defense = stats.get("def_rating")
-    pace = stats.get("pace", stats.get("e_pace"))
-    adjustment = 0.0
-    defense_factor = None
-    if defense is not None:
-        try:
-            # NBA defensive rating is points allowed per 100 possessions; 112 is a neutral anchor.
-            defense_factor = float(np.clip((float(defense)-112.0)*0.0035, -0.06, 0.06))
-            adjustment += base["projection"] * defense_factor
-        except (TypeError, ValueError):
-            defense_factor = None
-    h2h_mean = float(np.mean(h2h)) if h2h else None
-    h2h_weight = min(0.25, len(h2h)/20.0)
-    if h2h_mean is not None:
-        adjustment += (h2h_mean-base["projection"])*h2h_weight
-    role = detect_role_change(rows)
-    role_adjustment = 0.0
-    if role["minutes_change"] is not None:
-        role_adjustment = float(np.clip(role["minutes_change"]*0.22, -3.0, 3.0))
-        if stat != "MIN":
-            per_minute = base["projection"]/max(1.0, minutes_projection(rows) or 1.0)
-            adjustment += role_adjustment*per_minute
-        else:
-            adjustment += role_adjustment
-    return {
-        "base_projection":float(base["projection"]),
-        "adjusted_projection":float(max(0,base["projection"]+adjustment)),
-        "opponent_def_rating":float(defense) if defense is not None else None,
-        "opponent_pace":float(pace) if pace is not None else None,
-        "h2h_mean":h2h_mean,"h2h_games":len(h2h),
-        "role":role,"role_adjustment":float(role_adjustment),
-        "sample":base["n"],
-        "note":"Opponent defense is a team-level rating adjustment and H2H is shrunk toward the player's baseline. Small H2H samples are descriptive, not predictive."
-    }
+def _stats(row):
+    return row.get("stats") if isinstance(row.get("stats"),dict) else row
+
+def _finite(v):
+    x=as_float(v)
+    return float(x) if np.isfinite(x) else None
+
+def _position(value):
+    p=str(value or "").upper()
+    if "G" in p and "F" in p: return "G-F"
+    if "F" in p and "C" in p: return "F-C"
+    if p.startswith("G"): return "G"
+    if p.startswith("F"): return "F"
+    if p.startswith("C"): return "C"
+    return None
 
 def detect_role_change(rows):
-    mins=[as_float(r.get("min")) for r in rows]
-    mins=[x for x in mins if np.isfinite(x) and x>0]
-    if len(mins)<6:
+    usable=[r for r in rows if (_finite(r.get("min")) or 0)>0]
+    if len(usable)<6:
         return {"label":"Insufficient sample","minutes_change":None,"recent_minutes":None,"prior_minutes":None,"usage_change":None}
-    recent=mins[:5]; prior=mins[5:15]
-    recent_min=float(np.mean(recent)); prior_min=float(np.mean(prior)) if prior else recent_min
-    # Approximate usage from box-score opportunity counts; not official usage percentage.
-    def usage(row):
-        vals=[as_float(row.get(k)) for k in ("fga","fta","tov")]
-        if not all(np.isfinite(v) for v in vals): return None
-        return vals[0]+0.44*vals[1]+vals[2]
-    r_use=[usage(x) for x in rows[:5]]
-    p_use=[usage(x) for x in rows[5:15]]
-    r_use=[x for x in r_use if x is not None]; p_use=[x for x in p_use if x is not None]
-    use_change=(float(np.mean(r_use))-float(np.mean(p_use))) if r_use and p_use else None
+    recent=usable[:5]; prior=usable[5:15]
+    recent_min=float(np.mean([_finite(x.get("min")) for x in recent]))
+    prior_min=float(np.mean([_finite(x.get("min")) for x in prior])) if prior else recent_min
+    def opportunity(row):
+        fga=_finite(row.get("fga")); fta=_finite(row.get("fta"))
+        tov=_finite(row.get("turnover",row.get("tov")))
+        if fga is None or fta is None or tov is None: return None
+        return fga+0.44*fta+tov
+    ru=[opportunity(x) for x in recent]; pu=[opportunity(x) for x in prior]
+    ru=[x for x in ru if x is not None]; pu=[x for x in pu if x is not None]
+    use_change=float(np.mean(ru)-np.mean(pu)) if ru and pu else None
     change=recent_min-prior_min
     if change>=3 and (use_change is None or use_change>=0.5): label="Role trending up"
     elif change<=-3: label="Minutes trending down"
+    elif use_change is not None and use_change>=2: label="Usage trending up"
+    elif use_change is not None and use_change<=-2: label="Usage trending down"
     else: label="Stable rotation"
-    return {"label":label,"minutes_change":float(change),"recent_minutes":recent_min,"prior_minutes":prior_min,"usage_change":use_change}
+    return {"label":label,"minutes_change":change,"recent_minutes":recent_min,"prior_minutes":prior_min,"usage_change":use_change}
+
+@st.cache_data(ttl=1800,show_spinner=False)
+def _lineup_impact(team_id,player_id,season):
+    games=team_games_history(int(team_id),int(season))
+    finals=[g for g in games if g.get("status_state")=="final" or str(g.get("status","")).lower()=="final"]
+    game_ids=[g["id"] for g in finals[:12] if g.get("id") is not None]
+    if not game_ids: return {"on_net":None,"off_net":None,"net_diff":None,"on_minutes":0,"off_minutes":0,"on_lineups":0,"off_lineups":0}
+    rows=team_lineup_stats(int(team_id),game_ids)
+    on=[]; off=[]
+    for row in rows:
+        ids=row.get("player_ids") or []
+        stats=_stats(row)
+        mins=_finite(stats.get("min")); net=_finite(stats.get("net_rating"))
+        if mins is None or net is None or mins<=0: continue
+        (on if int(player_id) in [int(x) for x in ids] else off).append((mins,net))
+    on_minutes=sum(x[0] for x in on); off_minutes=sum(x[0] for x in off)
+    on_net=float(np.average([x[1] for x in on],weights=[x[0] for x in on])) if on else None
+    off_net=float(np.average([x[1] for x in off],weights=[x[0] for x in off])) if off else None
+    adequate=on_minutes>=60 and off_minutes>=60 and len(on)>=3 and len(off)>=3
+    return {"on_net":on_net,"off_net":off_net,"net_diff":(on_net-off_net) if adequate else None,
+            "on_minutes":on_minutes,"off_minutes":off_minutes,"on_lineups":len(on),"off_lineups":len(off),
+            "sample_adequate":adequate,"games":len(game_ids)}
+
+@st.cache_data(ttl=1800,show_spinner=False)
+def _positional_defense(team_id,position,season):
+    games=team_games_history(int(team_id),int(season))
+    finals=[g for g in games if g.get("status_state")=="final" or str(g.get("status","")).lower()=="final"]
+    game_ids=[g["id"] for g in finals[:12] if g.get("id") is not None]
+    rows=team_box_scores(game_ids)
+    allowed={k:0.0 for k in ("pts","reb","ast","stl","blk","fg3m","min")}
+    count=0
+    for row in rows:
+        team_id_row=row.get("team_id") or (row.get("team") or {}).get("id")
+        if team_id_row is None or int(team_id_row)==int(team_id): continue
+        player=row.get("player") or {}
+        pos=_position(player.get("position"))
+        if pos is None or pos!=position: continue
+        stats=_stats(row); minutes=_finite(stats.get("min"))
+        if minutes is None or minutes<=0: continue
+        for key in allowed:
+            value=_finite(stats.get(key))
+            if value is not None: allowed[key]+=value
+        count+=1
+    minutes=allowed["min"]
+    per36={k:(v/minutes*36 if minutes>0 else None) for k,v in allowed.items() if k!="min"}
+    return {"position":position,"opponent_games":len(game_ids),"player_game_rows":count,
+            "minutes":minutes,"allowed_per36":per36,
+            "note":"Recent box-score production allowed to opposing players listed at this position; descriptive only, not a league-relative defensive rank."}
+
+@st.cache_data(ttl=1800,show_spinner=False)
+def _player_advanced_context(player_id,season):
+    rows=player_advanced_game_stats(int(player_id),int(season))
+    if not rows: return {}
+    fields=("usage_percentage","true_shooting_percentage","offensive_rating","defensive_rating","net_rating","pace","assist_percentage","rebound_percentage","matchup_fg_pct","matchup_fga","matchup_minutes")
+    out={}
+    for field in fields:
+        values=[_finite(_stats(r).get(field)) for r in rows]
+        values=[x for x in values if x is not None]
+        if values: out[field]=float(np.mean(values))
+    out["games"]=len(rows)
+    return out
+
+@st.cache_data(ttl=1800,show_spinner=False)
+def analyze_matchup(player_id,opponent_id,stat="PTS",season=None):
+    season=int(season or current_season_start())
+    raw=player_game_history(int(player_id),season)
+    rows=player_rows(raw)
+    if len(rows)<5: return {"error":"Not enough player game logs for matchup analysis."}
+    base=rolling_projection(rows,stat)
+    if not base: return {"error":f"No usable {stat} history."}
+    player=next((r.get("player") or {} for r in raw if r.get("player")), {})
+    team=next((r.get("team") or {} for r in raw if r.get("team")), {})
+    team_id=team.get("id") or player.get("team_id")
+    position=_position(player.get("position"))
+    key=STAT_MAP.get(stat,stat.lower())
+    h2h=[]
+    game_by_id={ (x.get("game") or {}).get("id"):x.get("game") or {} for x in raw}
+    for row in rows:
+        game=game_by_id.get(row.get("game_id"),{})
+        home_id=(game.get("home_team") or {}).get("id"); away_id=(game.get("visitor_team") or {}).get("id")
+        if int(opponent_id) in (home_id,away_id):
+            value=_finite(row.get(key))
+            if value is not None: h2h.append(value)
+    h2h=h2h[:8]
+    adv=team_advanced_averages(int(opponent_id),season)
+    team_stats=_stats(adv[0]) if adv else {}
+    defense=_finite(team_stats.get("def_rating",team_stats.get("defensive_rating")))
+    pace=_finite(team_stats.get("pace",team_stats.get("e_pace")))
+    role=detect_role_change(rows)
+    minutes=minutes_projection(rows)
+    adjustment=0.0
+    # Team defensive efficiency: capped to avoid a small rating gap dominating the player's history.
+    if defense is not None:
+        adjustment+=base["projection"]*float(np.clip((defense-112.0)*0.0025,-0.045,0.045))
+    h2h_mean=float(np.mean(h2h)) if h2h else None
+    if h2h_mean is not None:
+        adjustment+=(h2h_mean-base["projection"])*min(0.20,len(h2h)/25.0)
+    if role["minutes_change"] is not None:
+        delta_min=float(np.clip(role["minutes_change"]*0.20,-2.5,2.5))
+        adjustment+=delta_min if stat=="MIN" else delta_min*(base["projection"]/max(1.0,minutes or 1.0))
+    pos_context=_positional_defense(int(opponent_id),position,season) if position else None
+    pos_adjustment=0.0
+    if pos_context and minutes and pos_context["allowed_per36"].get(key) is not None and stat!="MIN":
+        # Conservative positional allowance signal is exposed, but not converted into a false league rank.
+        # It is used as a small player-specific rate context only when a neutral reference is available.
+        pass
+    lineup=_lineup_impact(int(team_id),int(player_id),season) if team_id else {}
+    advanced=_player_advanced_context(int(player_id),season)
+    return {
+        "base_projection":float(base["projection"]),"adjusted_projection":float(max(0,base["projection"]+adjustment)),
+        "opponent_def_rating":defense,"opponent_pace":pace,"h2h_mean":h2h_mean,"h2h_games":len(h2h),
+        "role":role,"role_adjustment":float(adjustment),"sample":base["n"],"position":position,
+        "positional_defense":pos_context,"lineup_impact":lineup,"advanced":advanced,
+        "note":"Opponent team rating, recent position-specific box-score allowance, actual lineup on/off splits, advanced player rates and H2H context are shown separately. On/off and position splits are descriptive, sample-dependent signals; they are not causal guarantees."
+    }
 
 def team_injury_context(team_id):
-    rows=injuries()
-    relevant=[]
+    rows=injuries(); relevant=[]
     for item in rows:
         p=item.get("player") or {}
         if p.get("team_id")==int(team_id):
