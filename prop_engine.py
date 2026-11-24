@@ -33,79 +33,83 @@ def _injury_ids():
         return set()
 
 def build_player_projection_board(games, max_players_per_team=12):
+    """Fetch slate rosters and player logs in bulk; optional context never blocks the board."""
     season = current_season_start()
     unavailable = _injury_ids()
-    board, seen = [], set()
+    teams = {}
     for game in games:
-        home, away = game.get("home_team") or {}, game.get("visitor_team") or {}
-        for team, opponent in ((home, away), (away, home)):
-            team_id = team.get("id")
-            if not team_id:
+        for team, opponent in ((game.get("home_team") or {}, game.get("visitor_team") or {}),
+                               (game.get("visitor_team") or {}, game.get("home_team") or {})):
+            if team.get("id"):
+                teams[int(team["id"])] = (team, opponent, game)
+    try:
+        roster = players_for_teams(list(teams))
+        roster = [p for p in roster if p.get("id") and p.get("is_active") is not False
+                  and p.get("id") not in unavailable]
+        raw = player_game_stats_many([p["id"] for p in roster], season) if roster else []
+    except Exception as exc:
+        raise RuntimeError(f"Could not load team rosters/player game logs: {exc}") from exc
+    by_player = {}
+    for row in raw:
+        pid = (row.get("player") or {}).get("id")
+        if pid is not None:
+            by_player.setdefault(int(pid), []).append(row)
+    roster_by_team = {}
+    for player in roster:
+        team_id = (player.get("team") or {}).get("id") or player.get("team_id")
+        if team_id is not None:
+            roster_by_team.setdefault(int(team_id), []).append(player)
+    board = []
+    for team_id, (team, opponent, game) in teams.items():
+        context = _optional_opponent_context(opponent.get("id"), season) if opponent.get("id") else {}
+        eligible = []
+        for player in roster_by_team.get(team_id, []):
+            logs = player_rows(by_player.get(int(player["id"]), []))
+            if len(logs) < 5:
                 continue
-            try:
-                roster = players_for_team(team_id)
-                roster = [p for p in roster if p.get("id") and p.get("is_active") is not False
-                          and p.get("id") not in seen and p.get("id") not in unavailable]
-                if not roster:
+            mins = minutes_projection(logs)
+            if mins is not None and mins >= 8:
+                eligible.append((mins, player, logs))
+        eligible.sort(key=lambda x: x[0], reverse=True)
+        for mins, player, logs in eligible[:max_players_per_team]:
+            recent_mins = [as_float(r.get("min")) for r in logs[:5]]
+            recent_mins = [v for v in recent_mins if np.isfinite(v) and v > 0]
+            prior_mins = [as_float(r.get("min")) for r in logs[5:15]]
+            prior_mins = [v for v in prior_mins if np.isfinite(v) and v > 0]
+            role_change = float(np.mean(recent_mins) - np.mean(prior_mins)) if recent_mins and prior_mins else 0.0
+            for stat in PROP_STATS:
+                proj = rolling_projection(logs, stat)
+                if not proj or proj["n"] < 5:
                     continue
-                raw = player_game_stats_many([p["id"] for p in roster], season)
-            except Exception:
-                continue
-            by_player = {}
-            for row in raw:
-                pid = (row.get("player") or {}).get("id")
-                if pid is not None:
-                    by_player.setdefault(int(pid), []).append(row)
-            context = _optional_opponent_context(opponent.get("id"), season) if opponent.get("id") else {}
-            eligible = []
-            for player in roster:
-                logs = player_rows(by_player.get(int(player["id"]), []))
-                if len(logs) < 5:
-                    continue
-                mins = minutes_projection(logs)
-                if mins is not None and mins >= 8:
-                    eligible.append((mins, player, logs))
-            eligible.sort(key=lambda x: x[0], reverse=True)
-            for mins, player, logs in eligible[:max_players_per_team]:
-                seen.add(int(player["id"]))
-                recent_mins = [as_float(r.get("min")) for r in logs[:5]]
-                recent_mins = [v for v in recent_mins if np.isfinite(v) and v > 0]
-                prior_mins = [as_float(r.get("min")) for r in logs[5:15]]
-                prior_mins = [v for v in prior_mins if np.isfinite(v) and v > 0]
-                role_change = float(np.mean(recent_mins) - np.mean(prior_mins)) if recent_mins and prior_mins else 0.0
-                for stat in PROP_STATS:
-                    proj = rolling_projection(logs, stat)
-                    if not proj or proj["n"] < 5:
-                        continue
-                    values = [float(v) for v in proj["values"] if np.isfinite(v)]
-                    key = {"PTS":"pts","REB":"reb","AST":"ast","3PM":"fg3m","STL":"stl","BLK":"blk"}[stat]
-                    rates = []
-                    for row in logs[:10]:
-                        value, played = as_float(row.get(key)), as_float(row.get("min"))
-                        if np.isfinite(value) and np.isfinite(played) and played > 0:
-                            rates.append(value / played)
-                    estimate = float(proj["projection"])
-                    if rates:
-                        estimate = .55 * estimate + .45 * float(np.mean(rates)) * mins
-                    defense, pace = context.get("def_rating", float("nan")), context.get("pace", float("nan"))
-                    if np.isfinite(defense):
-                        estimate *= 1 + float(np.clip((defense - 112) * .0015, -.035, .035))
-                    if np.isfinite(pace):
-                        estimate *= 1 + float(np.clip((pace - 100) * .001, -.025, .025))
-                    estimate *= 1.025 if role_change >= 3 else (.975 if role_change <= -3 else 1.0)
-                    board.append({
-                        "game_id": game.get("id"),
-                        "matchup": f"{away.get('abbreviation','Away')} @ {home.get('abbreviation','Home')}",
-                        "player_id": int(player["id"]),
-                        "player": (player.get("first_name","") + " " + player.get("last_name","")).strip(),
-                        "team": team.get("abbreviation",""), "opponent": opponent.get("abbreviation",""),
-                        "market": stat, "projection": round(max(0, estimate), 2),
-                        "last5": round(float(proj["last5"]), 2), "last10": round(float(proj["last10"]), 2),
-                        "minutes": round(float(mins), 1), "role_change": round(role_change, 1),
-                        "opponent_def_rating": round(float(defense), 2) if np.isfinite(defense) else None,
-                        "opponent_pace": round(float(pace), 2) if np.isfinite(pace) else None,
-                        "sample": len(values), "line": None, "_values": values
-                    })
+                values = [float(v) for v in proj["values"] if np.isfinite(v)]
+                key = {"PTS":"pts","REB":"reb","AST":"ast","3PM":"fg3m","STL":"stl","BLK":"blk"}[stat]
+                rates = []
+                for row in logs[:10]:
+                    value, played = as_float(row.get(key)), as_float(row.get("min"))
+                    if np.isfinite(value) and np.isfinite(played) and played > 0:
+                        rates.append(value / played)
+                estimate = float(proj["projection"])
+                if rates:
+                    estimate = .55 * estimate + .45 * float(np.mean(rates)) * mins
+                defense, pace = context.get("def_rating", float("nan")), context.get("pace", float("nan"))
+                if np.isfinite(defense):
+                    estimate *= 1 + float(np.clip((defense - 112) * .0015, -.035, .035))
+                if np.isfinite(pace):
+                    estimate *= 1 + float(np.clip((pace - 100) * .001, -.025, .025))
+                estimate *= 1.025 if role_change >= 3 else (.975 if role_change <= -3 else 1.0)
+                board.append({
+                    "game_id": game.get("id"),
+                    "matchup": f"{(game.get('visitor_team') or {}).get('abbreviation','Away')} @ {(game.get('home_team') or {}).get('abbreviation','Home')}",
+                    "player_id": int(player["id"]),
+                    "player": (player.get("first_name","") + " " + player.get("last_name","")).strip(),
+                    "team": team.get("abbreviation",""), "opponent": opponent.get("abbreviation",""),
+                    "market": stat, "projection": round(max(0, estimate), 2),
+                    "last5": round(float(proj["last5"]), 2), "last10": round(float(proj["last10"]), 2),
+                    "minutes": round(float(mins), 1), "role_change": round(role_change, 1),
+                    "opponent_def_rating": round(float(defense), 2) if np.isfinite(defense) else None,
+                    "opponent_pace": round(float(pace), 2) if np.isfinite(pace) else None,
+                    "sample": len(values), "line": None, "_values": values
+                })
     return sorted(board, key=lambda x: (x["minutes"], x["sample"]), reverse=True)
 
 def build_model_legs(board, min_sample=8, min_probability=0.58):
