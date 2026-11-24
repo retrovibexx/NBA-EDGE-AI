@@ -163,13 +163,19 @@ def players_for_team(team_id):
 
 @st.cache_data(ttl=1800,show_spinner=False)
 def player_game_stats_many(player_ids, season):
+    """Fetch player logs in small URL-safe batches to avoid HTTP 431 header/request-line errors."""
     ids = sorted({int(x) for x in player_ids if x is not None})
     if not ids:
         return []
-    rows = pages("/v1/stats", {"player_ids[]": ids, "seasons[]": int(season), "per_page": 100}, 30)
+    rows = []
+    # The BDL API encodes each player_ids[] item into the URL. Keep batches small
+    # because a full NBA slate roster can exceed proxy request-line limits.
+    batch_size = 12
+    for offset in range(0, len(ids), batch_size):
+        batch = ids[offset:offset + batch_size]
+        rows.extend(pages("/v1/stats", {"player_ids[]": batch, "seasons[]": int(season), "per_page": 100}, 30))
     rows.sort(key=lambda x: (x.get("game") or {}).get("date", ""), reverse=True)
     return rows
-
 
 @st.cache_data(ttl=21600,show_spinner=False)
 def players_for_teams(team_ids):
