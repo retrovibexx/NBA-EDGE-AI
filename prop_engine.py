@@ -1,4 +1,4 @@
-from bdl import player_game_stats, search_players, current_season_start
+from bdl import player_game_stats, search_players, current_season_start, player_by_id
 from features import player_rows, rolling_projection, empirical_over_probability
 STAT_FOR_PROP={"points":"PTS","rebounds":"REB","assists":"AST","steals":"STL","blocks":"BLK","threes":"3PM","points_rebounds":"PTS","points_assists":"PTS","points_rebounds_assists":"PTS","rebounds_assists":"REB"}
 def american_prob(odds):
@@ -31,7 +31,7 @@ def analyze_props(game,props,max_players=35):
             direction="over" if over_edge>=under_edge else "under"
             probability=over if direction=="over" else 1-over
             edge=max(over_edge,under_edge)
-            player=prop.get("player") or {}
+            player=prop.get("player") or player_by_id(pid)
             results.append({"game_id":game["id"],"player_id":pid,"player":f"{player.get('first_name','Player')} {player.get('last_name','')}","market":kind,"line":float(line),"direction":direction,"probability":float(probability),"projection":float(proj["projection"]),"edge":float(edge),"vendor":prop.get("vendor",""),"updated_at":prop.get("updated_at"),"sample":proj["n"],"source":"BALLDONTLIE player props + season game logs"})
         except Exception:
             continue
