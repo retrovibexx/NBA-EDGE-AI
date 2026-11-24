@@ -44,6 +44,25 @@ def request(path,params=None,required=True):
         r.raise_for_status()
         return r.json()
     raise RuntimeError("BALLDONTLIE request failed after retries.")
+def pages(path, params=None, max_pages=3):
+    """Fetch a bounded number of paginated BALLDONTLIE results."""
+    query=dict(params or {})
+    cursor=None
+    rows=[]
+    for _ in range(max(1,int(max_pages))):
+        page_query=dict(query)
+        if cursor is not None:
+            page_query["cursor"]=cursor
+        payload=request(path,page_query)
+        if not isinstance(payload,dict):
+            break
+        batch=payload.get("data") or []
+        rows.extend(batch)
+        cursor=(payload.get("meta") or {}).get("next_cursor")
+        if not cursor or not batch:
+            break
+    return rows
+
 @st.cache_data(ttl=180,show_spinner=False)
 def games_for_date(day): return pages("/v1/games",{"dates[]":day,"per_page":100})
 @st.cache_data(ttl=900,show_spinner=False)
