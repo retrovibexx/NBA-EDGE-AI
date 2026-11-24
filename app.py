@@ -70,9 +70,12 @@ with tabs[1]:
         g=game_labels[selected]
         away=g["visitor_team"]; home=g["home_team"]
         sims=st.slider("Simulations",2000,50000,15000,1000)
-        if st.button("Run matchup simulation",type="primary"):
+        can_predict=(g.get("status_state")=="scheduled")
+        if not can_predict:
+            st.warning("Only upcoming scheduled games can be forecast. Live and completed games are excluded to prevent result leakage.")
+        if st.button("Run matchup simulation",type="primary",disabled=not can_predict):
             with st.spinner("Analyzing recent team results…"):
-                result=predict_game(away,home,sims)
+                result=predict_game(away,home,sims,g.get("date"),g.get("id"))
             if result.get("error"): st.error(result["error"])
             else:
                 x,y,z=st.columns(3)
