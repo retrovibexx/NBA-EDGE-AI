@@ -159,14 +159,14 @@ with tabs[4]:
                 try:
                     board=build_player_projection_board(games)
                     st.session_state['model_player_board']=board
-                    st.session_state['model_prop_legs']=build_model_legs(board)
-                    if board: st.success(f'Built {len(board)} player-stat projections and {len(st.session_state[\"model_prop_legs\"])} model-generated legs.')
+                    st.session_state['model_auto_legs']=build_model_legs(board)
+                    if board: st.success(f'Built {len(board)} player-stat projections and {len(st.session_state["model_prop_legs"])} model-generated legs.')
                     else: st.warning('No player projections returned. Check Data Health and player/team game-log access.')
                 except Exception as e: st.error(f'Projection board failed: {type(e).__name__}: {e}')
-    if st.session_state.get('model_prop_legs'):
+    if st.session_state.get('model_auto_legs'):
         st.subheader('AI-generated parlay candidates')
         st.caption('Suggested target lines are calculated from player game logs, projected minutes, role trend and available opponent defense/pace data. They are model targets, not confirmed sportsbook lines.')
-        auto_legs=st.session_state['model_prop_legs']
+        auto_legs=st.session_state['model_auto_legs']
         auto_candidates=build_candidates(auto_legs,leg_count,10)
         if auto_candidates:
             for i,candidate in enumerate(auto_candidates[:5]):
@@ -188,9 +188,9 @@ with tabs[4]:
             for i,row in edited.iterrows():
                 item=dict(raw_board[i]); item['line']=row.get('line'); merged.append(item)
             legs=evaluate_manual_lines(merged)
-            st.session_state['model_prop_legs']=legs
+            st.session_state['model_manual_legs']=legs
             st.success(f'Evaluated {len(legs)} entered player lines.')
-    legs=st.session_state.get('model_prop_legs',[])
+    legs=st.session_state.get('model_manual_legs',[])
     if legs:
         st.subheader('Model estimates against your entered lines')
         st.dataframe(pd.DataFrame(legs).drop(columns=['game_id','player_id'],errors='ignore'),use_container_width=True,hide_index=True)
