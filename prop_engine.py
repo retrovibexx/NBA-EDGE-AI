@@ -1,5 +1,5 @@
 import numpy as np
-from bdl import player_game_stats, current_season_start, player_by_id
+from bdl import player_game_stats, current_season_start, player_by_id, player_game_lineup_status
 from features import player_rows, rolling_projection, empirical_over_probability, as_float
 from matchup_engine import analyze_matchup
 
@@ -53,6 +53,7 @@ def analyze_props(game,props,max_players=35):
                         values=[float(v)+delta for v in values]
                 except Exception:
                     matchup=None
+            lineup_status=player_game_lineup_status(game["id"],pid)
             over=empirical_over_probability(values,float(line))
             if over is None: continue
             market=prop.get("market") or {}
@@ -71,7 +72,7 @@ def analyze_props(game,props,max_players=35):
             probability=over_est if direction=="over" else 1-over_est
             edge=max(over_edge,under_edge)
             role_label=(matchup or {}).get("role",{}).get("label","Unavailable")
-            results.append({"game_id":game["id"],"player_id":pid,"player":f"{player.get('first_name','Player')} {player.get('last_name','')}","market":kind,"line":float(line),"direction":direction,"probability":float(probability),"projection":projection,"edge":float(edge),"vendor":prop.get("vendor",""),"updated_at":prop.get("updated_at"),"sample":len(values),"role_signal":role_label,"matchup_adjustment":round(float(matchup["adjusted_projection"])-float(matchup["base_projection"]),2) if matchup and not matchup.get("error") else None,"h2h_games":(matchup or {}).get("h2h_games",0),"position":(matchup or {}).get("position"),"positional_adjustment":(matchup or {}).get("positional_adjustment"),"source":"BALLDONTLIE player props + matchup-adjusted recent game logs"})
+            results.append({"game_id":game["id"],"player_id":pid,"player":f"{player.get('first_name','Player')} {player.get('last_name','')}","market":kind,"line":float(line),"direction":direction,"probability":float(probability),"projection":projection,"edge":float(edge),"vendor":prop.get("vendor",""),"updated_at":prop.get("updated_at"),"sample":len(values),"role_signal":role_label,"matchup_adjustment":round(float(matchup["adjusted_projection"])-float(matchup["base_projection"]),2) if matchup and not matchup.get("error") else None,"h2h_games":(matchup or {}).get("h2h_games",0),"position":(matchup or {}).get("position"),"positional_adjustment":(matchup or {}).get("positional_adjustment"),"lineup_status":lineup_status.get("status"),"lineup_source":lineup_status.get("source"),"source":"BALLDONTLIE player props + matchup-adjusted recent game logs"})
         except Exception:
             continue
     return sorted(results,key=lambda x:x["edge"],reverse=True)
