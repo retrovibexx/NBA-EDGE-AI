@@ -135,7 +135,7 @@ def _player_advanced_context(player_id,season):
     return out
 
 @st.cache_data(ttl=1800,show_spinner=False)
-def analyze_matchup(player_id,opponent_id,stat="PTS",season=None):
+def analyze_matchup(player_id,opponent_id,stat="PTS",season=None,include_full=True):
     season=int(season or current_season_start())
     raw=player_game_history(int(player_id),season)
     rows=player_rows(raw)
@@ -186,8 +186,8 @@ def analyze_matchup(player_id,opponent_id,stat="PTS",season=None):
                 adjustment+=pos_adjustment
         except Exception:
             pos_baseline=None
-    lineup=_lineup_impact(int(team_id),int(player_id),season) if team_id else {}
-    advanced=_player_advanced_context(int(player_id),season)
+    lineup=_lineup_impact(int(team_id),int(player_id),season) if team_id and include_full else {}
+    advanced=_player_advanced_context(int(player_id),season) if include_full else {}
     return {
         "base_projection":float(base["projection"]),"adjusted_projection":float(max(0,base["projection"]+adjustment)),
         "opponent_def_rating":defense,"opponent_pace":pace,"h2h_mean":h2h_mean,"h2h_games":len(h2h),
