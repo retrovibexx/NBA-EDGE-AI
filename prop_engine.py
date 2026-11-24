@@ -1,7 +1,7 @@
 """Data-driven NBA player projections and model-generated parlay candidates."""
 import math
 import numpy as np
-from bdl import player_game_stats_many, current_season_start, players_for_team, team_advanced_averages, injuries
+from bdl import player_game_stats_many, current_season_start, players_for_teams, team_advanced_averages, injuries
 from features import player_rows, rolling_projection, empirical_over_probability, as_float, minutes_projection
 
 PROP_STATS = ["PTS", "REB", "AST", "3PM", "STL", "BLK"]
