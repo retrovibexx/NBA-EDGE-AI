@@ -5,6 +5,14 @@ from features import player_rows, rolling_projection, empirical_over_probability
 
 PROP_STATS = ["PTS", "REB", "AST", "3PM", "STL", "BLK"]
 
+def american_prob(odds):
+    try:
+        value = float(odds)
+        return (-value) / ((-value) + 100) if value < 0 else 100 / (value + 100)
+    except (TypeError, ValueError, ZeroDivisionError):
+        return None
+
+
 def build_player_projection_board(games, max_players_per_team=12):
     board, seen = [], set()
     for game in games:
