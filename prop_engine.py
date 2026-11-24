@@ -80,20 +80,12 @@ def build_player_projection_board(games, max_players_per_team=4):
                     continue
                 values = [float(v) for v in proj["values"] if np.isfinite(v)]
                 key = {"PTS":"pts","REB":"reb","AST":"ast","3PM":"fg3m","STL":"stl","BLK":"blk"}[stat]
-                rates = []
-                for row in logs[:10]:
-                    value, played = as_float(row.get(key)), as_float(row.get("min"))
-                    if np.isfinite(value) and np.isfinite(played) and played > 0:
-                        rates.append(value / played)
+                # Keep the parlay board's player projection identical to the
+                # Player Projection Lab and walk-forward backtest.
+                # Role/minute changes are shown as context, not applied as an
+                # unvalidated multiplier to the forecast.
                 estimate = float(proj["projection"])
-                if rates:
-                    estimate = .55 * estimate + .45 * float(np.mean(rates)) * mins
                 defense, pace = context.get("def_rating", float("nan")), context.get("pace", float("nan"))
-                if np.isfinite(defense):
-                    estimate *= 1 + float(np.clip((defense - 112) * .0015, -.035, .035))
-                if np.isfinite(pace):
-                    estimate *= 1 + float(np.clip((pace - 100) * .001, -.025, .025))
-                estimate *= 1.025 if role_change >= 3 else (.975 if role_change <= -3 else 1.0)
                 board.append({
                     "game_id": game.get("id"),
                     "matchup": f"{(game.get('visitor_team') or {}).get('abbreviation','Away')} @ {(game.get('home_team') or {}).get('abbreviation','Home')}",
@@ -108,6 +100,28 @@ def build_player_projection_board(games, max_players_per_team=4):
                     "sample": len(values), "line": None, "_values": values
                 })
     return sorted(board, key=lambda x: (x["minutes"], x["sample"]), reverse=True)
+
+def _wilson_lower(successes, trials, z=1.96):
+    """Conservative lower confidence bound for a binomial hit rate."""
+    if trials <= 0:
+        return 0.0
+    p = successes / trials
+    z2 = z * z
+    denom = 1 + z2 / trials
+    center = p + z2 / (2 * trials)
+    spread = z * math.sqrt((p * (1 - p) / trials) + z2 / (4 * trials * trials))
+    return max(0.0, (center - spread) / denom)
+
+
+def _sample_quality(values, line, direction):
+    arr = np.asarray(values, dtype=float)
+    arr = arr[np.isfinite(arr)]
+    if not len(arr):
+        return 0, 0.0, 0.0
+    hits = int(np.sum(arr > line)) if direction == "over" else int(np.sum(arr < line))
+    rate = (hits + 1) / (len(arr) + 2)
+    return len(arr), float(rate), float(_wilson_lower(hits, len(arr)))
+
 
 def build_model_legs(board, min_sample=6, min_probability=0.55):
     legs = []
@@ -126,12 +140,16 @@ def build_model_legs(board, min_sample=6, min_probability=0.55):
             if probability < min_probability or probability >= .96:
                 continue
             item = {k:v for k,v in row.items() if not k.startswith("_")}
+            sample_n, consistency_rate, confidence_floor = _sample_quality(values, line, direction)
             item.update({"line": float(line), "direction": direction, "probability": float(probability),
-                         "edge": float(probability - .5),
+                         "edge": float(probability - .5), "consistency_rate": consistency_rate,
+                         "confidence_score": confidence_floor, "confidence_sample": sample_n,
+                         "confidence_label": "sample-supported" if sample_n >= 15 else "limited sample",
                          "source": "NBA Edge model target from recent player logs, minutes, role and available opponent context",
                          "target_line_type": "model suggestion; verify sportsbook availability"})
             legs.append(item)
-    return sorted(legs, key=lambda x: (x["probability"], x["projection"], x["minutes"]), reverse=True)
+    # Rank by the conservative lower confidence bound first, not raw hit rate alone.
+    return sorted(legs, key=lambda x: (x["confidence_score"], x["confidence_sample"], x["minutes"]), reverse=True)
 
 def evaluate_manual_lines(board):
     evaluated = []
@@ -146,8 +164,11 @@ def evaluate_manual_lines(board):
         direction = "over" if over >= .5 else "under"
         probability = over if direction == "over" else 1 - over
         item = {k:v for k,v in row.items() if not k.startswith("_")}
+        sample_n, consistency_rate, confidence_floor = _sample_quality(row.get("_values") or [], line, direction)
         item.update({"line": line, "direction": direction, "probability": float(probability),
-                     "edge": abs(float(probability)-.5),
+                     "edge": abs(float(probability)-.5), "consistency_rate": consistency_rate,
+                     "confidence_score": confidence_floor, "confidence_sample": sample_n,
+                     "confidence_label": "sample-supported" if sample_n >= 15 else "limited sample",
                      "source": "Recent NBA game logs; user-entered sportsbook line"})
         evaluated.append(item)
-    return sorted(evaluated, key=lambda x: x["edge"], reverse=True)
+    return sorted(evaluated, key=lambda x: (x["confidence_score"], x["confidence_sample"]), reverse=True)

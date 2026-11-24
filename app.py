@@ -167,12 +167,23 @@ with tabs[4]:
         st.subheader('AI-generated parlay candidates')
         st.caption('Suggested target lines are calculated from player game logs, projected minutes, role trend and available opponent defense/pace data. They are model targets, not confirmed sportsbook lines.')
         auto_legs=st.session_state['model_auto_legs']
+        st.markdown("**Top sample-supported player prop targets**")
+        shortlist=pd.DataFrame([{
+            "Player":x.get("player"),"Matchup":x.get("matchup"),"Market":x.get("market"),
+            "Direction":x.get("direction"),"Suggested line":x.get("line"),
+            "Projection":x.get("projection"),"Recent hit estimate":x.get("probability"),
+            "Confidence floor":x.get("confidence_score"),"Games sampled":x.get("confidence_sample"),
+            "Minutes":x.get("minutes")
+        } for x in auto_legs[:15]])
+        if not shortlist.empty:
+            st.dataframe(shortlist,use_container_width=True,hide_index=True)
+            st.caption("Ranked by a conservative Wilson lower bound from recent box-score outcomes. These are model-generated target lines, not live sportsbook lines or calibrated betting probabilities.")
         auto_candidates=build_candidates(auto_legs,leg_count,10)
         if auto_candidates:
             for i,candidate in enumerate(auto_candidates[:5]):
                 with st.expander(f"AI parlay {i+1} · {candidate['mean_edge']:.1%} average model separation"):
                     for leg in candidate['legs']:
-                        st.write(f"{leg['player']} — {leg['direction'].upper()} {leg['line']} {leg['market']} · projection {leg['projection']:.1f} · recent-sample estimate {leg['probability']:.1%} · {leg['matchup']}")
+                        st.write(f"{leg['player']} — {leg['direction'].upper()} {leg['line']} {leg['market']} · projection {leg['projection']:.1f} · sample hit estimate {leg['probability']:.1%} · conservative confidence floor {leg.get('confidence_score',0):.1%} · {leg['matchup']}")
                     st.caption(candidate['warning'] + " Check that each suggested line is available at your sportsbook.")
         else:
             st.info(f"Not enough different games with supported player samples for a {leg_count}-leg parlay. Try fewer legs or another slate.")
@@ -194,6 +205,7 @@ with tabs[4]:
     if legs:
         st.subheader('Model estimates against your entered lines')
         st.dataframe(pd.DataFrame(legs).drop(columns=['game_id','player_id'],errors='ignore'),use_container_width=True,hide_index=True)
+        st.caption("Confidence score is the Wilson lower confidence bound from the player's recent game-log sample. It is a conservative sample-quality indicator, not sportsbook-calibrated win probability.")
         candidates=build_candidates(legs,leg_count,20)
         if candidates:
             st.subheader(f'Top {leg_count}-leg combinations')
@@ -219,13 +231,15 @@ with tabs[5]:
             st.markdown("**Game winner predictions**")
             st.dataframe(game_hist,use_container_width=True,hide_index=True)
             st.download_button("Download game prediction history CSV", game_hist.to_csv(index=False).encode("utf-8"), "nba_game_predictions.csv", "text/csv")
-            graded=game_hist[game_hist["graded"]==1]
+            graded=game_hist[game_hist["graded"]==1].copy()
             if len(graded):
                 correct=((graded.apply(lambda r: (r["home"] if r["p_home"]>=0.5 else r["away"])==r["actual_winner"],axis=1))).mean()
                 st.metric("Winner-direction accuracy",f"{correct:.1%}",f"{len(graded)} graded")
-            graded["actual_home_win"] = (graded["actual_winner"] == graded["home"]).astype(float)
-            game_brier = ((graded["p_home"] - graded["actual_home_win"]) ** 2).mean()
-            st.metric("Game probability Brier score", f"{game_brier:.3f}", "Lower is better; 0 is perfect")
+                graded["actual_home_win"] = (graded["actual_winner"] == graded["home"]).astype(float)
+                game_brier = ((graded["p_home"] - graded["actual_home_win"]) ** 2).mean()
+                st.metric("Game probability Brier score", f"{game_brier:.3f}", "Lower is better; 0 is perfect")
+            else:
+                st.info("No completed game predictions have been graded yet.")
         if not prop_hist.empty:
             st.markdown("**Player prop predictions**")
             st.dataframe(prop_hist,use_container_width=True,hide_index=True)
@@ -235,27 +249,89 @@ with tabs[5]:
                 st.metric("Player prop hit rate",f"{graded_props.hit.mean():.1%}",f"{len(graded_props)} graded legs")
                 prop_brier = ((graded_props["probability"] - graded_props["hit"]) ** 2).mean()
                 st.metric("Player prop probability Brier score", f"{prop_brier:.3f}", "Lower is better; 0 is perfect")
+                if "direction" in graded_props:
+                    direction_rows=graded_props.groupby("direction")["hit"].agg(["mean","count"]).reset_index()
+                    direction_rows=direction_rows.rename(columns={"direction":"Side","mean":"Hit rate","count":"Graded bets"})
+                    st.markdown("**Over vs. under performance**")
+                    st.dataframe(direction_rows,use_container_width=True,hide_index=True)
+                if "player" in graded_props:
+                    player_rows=graded_props.groupby("player")["hit"].agg(["mean","count"]).reset_index()
+                    player_rows=player_rows.rename(columns={"player":"Player","mean":"Hit rate","count":"Graded props"})
+                    player_rows=player_rows.sort_values(["Hit rate","Graded props"],ascending=[False,False])
+                    st.markdown("**Player consistency leaderboard (saved props only)**")
+                    st.dataframe(player_rows,use_container_width=True,hide_index=True)
+                if "probability" in graded_props:
+                    calibration=graded_props.dropna(subset=["probability","hit"]).copy()
+                    if not calibration.empty:
+                        calibration["Confidence band"]=pd.cut(calibration["probability"],[0,.5,.6,.7,.8,.9,1.000001],include_lowest=True)
+                        reliability=calibration.groupby("Confidence band",observed=False).agg(
+                            **{"Average predicted probability":("probability","mean"),
+                               "Actual hit rate":("hit","mean"),"Graded props":("hit","count")}
+                        ).reset_index()
+                        st.markdown("**Probability calibration (predicted vs. actual)**")
+                        st.dataframe(reliability,use_container_width=True,hide_index=True)
         if game_hist.empty and prop_hist.empty: st.info("Save predictions before games to start the record.")
     except Exception as e: st.error(f"History unavailable: {e}")
 with tabs[6]:
     st.subheader("Historical player projection backtest")
-    st.caption("Walk-forward testing uses only earlier games to predict later games; it does not use future data.")
-    bt_player=st.text_input("Player to backtest",placeholder="e.g. Jayson Tatum",key="bt_player")
+    st.caption("Walk-forward testing uses only earlier games to predict later games. Historical sportsbook prop lines are not included in the current provider feed.")
+    bt_players=st.text_input("Players to compare (comma-separated, up to 8)",placeholder="Anthony Davis, Jayson Tatum, Nikola Jokic",key="bt_players")
     bt_stat=st.selectbox("Backtest stat",["PTS","REB","AST","STL","BLK","MIN","3PM"],key="bt_stat")
-    if st.button("Run walk-forward backtest"):
-        from backtest import player_walk_forward
-        with st.spinner("Testing historical projections…"):
-            try: bt,note=player_walk_forward(bt_player,bt_stat)
-            except Exception as e: bt,note=None,str(e)
-        if bt:
-            a,b,c=st.columns(3)
-            a.metric("Mean absolute error",f"{bt['mae']:.2f}")
-            b.metric("Root mean squared error",f"{bt['rmse']:.2f}")
-            c.metric("Average bias",f"{bt['bias']:+.2f}")
-            st.write(f"Tested {bt['games']} historical games for {bt['player']} ({bt_stat}).")
-            st.line_chart(bt["rows"].set_index("date")[["predicted","actual"]])
-            st.dataframe(bt["rows"],use_container_width=True,hide_index=True)
-        else: st.warning(note)
+    bt_line_text=st.text_input("Optional fixed prop line (leave blank for projection accuracy only)",placeholder="e.g. 24.5",key="bt_line")
+    bt_line=None
+    if bt_line_text.strip():
+        try: bt_line=float(bt_line_text.strip())
+        except ValueError: st.warning("Enter a numeric prop line, or leave it blank.")
+    if st.button("Run NBA Edge accuracy tests"):
+        from backtest import player_walk_forward, multi_player_walk_forward
+        names=[x.strip() for x in bt_players.split(",") if x.strip()]
+        if not names:
+            st.warning("Enter at least one player.")
+        elif bt_line_text.strip() and bt_line is None:
+            st.warning("The prop line must be numeric.")
+        else:
+            with st.spinner("Running leakage-safe walk-forward tests. This can take a little while for several players…"):
+                try:
+                    comparison,errors=multi_player_walk_forward(names,bt_stat,line=bt_line)
+                    st.session_state["nba_edge_bt_comparison"]=comparison
+                    st.session_state["nba_edge_bt_errors"]=errors
+                    first,note=player_walk_forward(names[0],bt_stat,line=bt_line)
+                    st.session_state["nba_edge_bt_detail"]=first
+                    st.session_state["nba_edge_bt_note"]=note
+                except Exception as e:
+                    st.error(f"Backtest failed: {type(e).__name__}: {e}")
+    comparison=st.session_state.get("nba_edge_bt_comparison")
+    if comparison is not None and not comparison.empty:
+        st.markdown("**Player consistency and accuracy leaderboard**")
+        st.dataframe(comparison,use_container_width=True,hide_index=True)
+        if bt_line is not None and "line_hit_rate" in comparison:
+            valid=comparison.dropna(subset=["line_hit_rate"])
+            if not valid.empty:
+                best=valid.iloc[0]
+                st.metric("Best historical line hit rate in this test",f"{best['line_hit_rate']:.1%}",f"{best['player']} · {int(best['line_games'])} non-push games")
+        st.caption("The consistency leaderboard is based on the fixed line you entered. It is historical performance, not a guarantee or a verified sportsbook backtest.")
+    for issue in st.session_state.get("nba_edge_bt_errors",[]):
+        st.warning(issue)
+    bt=st.session_state.get("nba_edge_bt_detail")
+    if bt:
+        st.markdown(f"**Detailed walk-forward results: {bt['player']} ({bt_stat})**")
+        a,b,c=st.columns(3)
+        a.metric("Mean absolute error",f"{bt['mae']:.2f}")
+        b.metric("Root mean squared error",f"{bt['rmse']:.2f}")
+        c.metric("Average bias",f"{bt['bias']:+.2f}")
+        d,e,f=st.columns(3)
+        d.metric("Within 2 units",f"{bt['within_2']:.1%}")
+        e.metric("Within 3 units",f"{bt['within_3']:.1%}")
+        f.metric("Within 5 units",f"{bt['within_5']:.1%}")
+        if bt.get("line") is not None:
+            st.metric("Over/under direction hit rate",f"{bt['line_hit_rate']:.1%}" if bt.get("line_hit_rate") is not None else "Not enough graded games",f"{bt['line_games']} non-push games · {bt['pushes']} pushes")
+        if bt.get("confidence_within_3_mean") is not None:
+            st.write(f"Rolling confidence estimate of being within 3 units: {bt['confidence_within_3_mean']:.1%} · Observed rate in those later tests: {bt['observed_within_3_when_calibrated']:.1%}")
+        st.line_chart(bt["rows"].set_index("date")[["predicted","actual"]])
+        st.dataframe(bt["rows"],use_container_width=True,hide_index=True)
+        st.caption(st.session_state.get("nba_edge_bt_note",""))
+    elif st.session_state.get("nba_edge_bt_comparison") is not None:
+        st.info("No detailed player result is available yet.")
 
 with tabs[7]:
     st.subheader("Data health and source limitations")
