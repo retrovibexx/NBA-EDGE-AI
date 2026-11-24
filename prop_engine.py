@@ -26,7 +26,6 @@ def _optional_opponent_context(team_id, season):
 def build_player_projection_board(games, max_players_per_team=4):
     """Fetch slate rosters and player logs in bulk; optional context never blocks the board."""
     season = current_season_start()
-    unavailable = _injury_ids()
     teams = {}
     for game in games:
         for team, opponent in ((game.get("home_team") or {}, game.get("visitor_team") or {}),
@@ -35,8 +34,14 @@ def build_player_projection_board(games, max_players_per_team=4):
                 teams[int(team["id"])] = (team, opponent, game)
     try:
         roster = players_for_teams(list(teams))
-        roster = [p for p in roster if p.get("id") and p.get("is_active") is not False
-                  and p.get("id") not in unavailable]
+        roster = [p for p in roster if p.get("id") and p.get("is_active") is not False]
+        roster_by_team = {}
+        for player in roster:
+            tid = (player.get("team") or {}).get("id") or player.get("team_id")
+            if tid is not None:
+                roster_by_team.setdefault(int(tid), []).append(player)
+        # Limit API log pulls to a small rotation sample before requesting stats.
+        roster = [p for tid in teams for p in roster_by_team.get(tid, [])[:max_players_per_team]]
         raw = player_game_stats_many([p["id"] for p in roster], season) if roster else []
     except Exception as exc:
         raise RuntimeError(f"Could not load team rosters/player game logs: {exc}") from exc
