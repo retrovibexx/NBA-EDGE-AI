@@ -6,7 +6,7 @@ otherwise only projection-error metrics are reported.
 """
 import numpy as np
 import pandas as pd
-from bdl import search_players, player_game_history, current_season_start
+from bdl import search_players, player_game_stats, player_game_history, current_season_start
 from features import player_rows, rolling_projection, STAT_MAP, as_float
 
 
@@ -42,7 +42,7 @@ def _summarize(frame, player, stat, line=None):
     return result
 
 
-def player_walk_forward(name, stat, max_games=60, history=10, line=None):
+def player_walk_forward(name, stat, max_games=60, history=5, line=None):
     matches = search_players(name)
     if not matches:
         return None, "Player not found."
@@ -50,14 +50,18 @@ def player_walk_forward(name, stat, max_games=60, history=10, line=None):
         (p for p in matches if f"{p.get('first_name', '')} {p.get('last_name', '')}".strip().lower() == name.lower()),
         matches[0],
     )
-    rows = player_rows(player_game_history(exact["id"], current_season_start()))
+    rows = player_rows(player_game_stats(exact["id"], current_season_start()))
+    if len(rows) < 5:
+        rows = player_rows(player_game_history(exact["id"], current_season_start()))
     key = STAT_MAP.get(stat, stat.lower())
     chronological = list(reversed(rows))
     observations = []
     prior_abs_errors = []
 
     for i in range(history, len(chronological)):
-        past_chronological = chronological[max(0, i-history):i]
+        # Match the live model's maximum historical context while excluding
+        # the target game and every later game.
+        past_chronological = chronological[max(0, i-40):i]
         past = list(reversed(past_chronological))
         actual = as_float(chronological[i].get(key))
         if not np.isfinite(actual):
@@ -105,9 +109,10 @@ def player_walk_forward(name, stat, max_games=60, history=10, line=None):
         return None, "Not enough historical games for walk-forward evaluation."
     player = f"{exact.get('first_name', '')} {exact.get('last_name', '')}".strip()
     return _summarize(frame, player, stat, line), (
-        "Every forecast uses only games played before its target game. Confidence is a rolling "
-        "historical estimate of being within 3 stat units, based only on earlier walk-forward errors. "
-        "A supplied fixed line is a historical threshold proxy, not an archived sportsbook line."
+        "Each forecast uses the same rolling_projection function as the live Player Projection Lab "
+        "and parlay board, with only games dated before the target game. Confidence is a rolling "
+        "historical estimate of forecast error, not a sportsbook win probability. A supplied fixed "
+        "line is a threshold proxy, not an archived sportsbook line."
     )
 
 
