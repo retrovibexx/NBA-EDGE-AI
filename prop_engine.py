@@ -57,7 +57,7 @@ def build_player_projection_board(games, max_players_per_team=4):
             roster_by_team.setdefault(int(team_id), []).append(player)
     board = []
     for team_id, (team, opponent, game) in teams.items():
-        # Do not make one advanced-stats API call per opponent: the user plan is capped at 5 RPM.\n        # Core projections remain data-driven from player logs, minutes and role trend.\n        context = {}
+        # Do not make one advanced-stats API call per opponent: the user plan is capped at 5 RPM.\        # Optional opponent feeds are disabled to preserve the provider request budget.\n        context = {}
         eligible = []
         for player in roster_by_team.get(team_id, []):
             logs = player_rows(by_player.get(int(player["id"]), []))
