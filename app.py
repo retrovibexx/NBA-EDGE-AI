@@ -416,6 +416,14 @@ with tabs[9]:
                 for col,(key,label) in zip(adv_cols,[("usage_percentage","Usage"),("true_shooting_percentage","True shooting"),("net_rating","Net rating"),("matchup_fg_pct","Matchup FG%")]):
                     value = advanced.get(key)
                     col.metric(label, f"{value:.3f}" if value is not None and abs(value)<2 else (f"{value:.1f}" if value is not None else "N/A"))
+            vacancy = result.get("team_injury_vacancy") or {}
+            weighted = vacancy.get("weighted_vacated") or {}
+            st.markdown("**Teammate injury / rotation context**")
+            st.write(f"Weighted unavailable teammate production (status-adjusted estimate): {weighted.get('pts',0):.1f} PTS · {weighted.get('reb',0):.1f} REB · {weighted.get('ast',0):.1f} AST · {weighted.get('min',0):.1f} MIN")
+            if result.get("other_injured_teammates"):
+                st.dataframe(pd.DataFrame(result["other_injured_teammates"]),use_container_width=True,hide_index=True)
+            else:
+                st.caption("No other injured teammates with a usable status and season-average record were returned.")
             st.caption(result["note"])
     st.divider()
     st.markdown("**Current injury list for a team**")
