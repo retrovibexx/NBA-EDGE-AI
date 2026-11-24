@@ -1,32 +1,36 @@
 # NBA Edge AI
 
-A free-to-run NBA prediction dashboard for game winners and player stat projections. Built with Python and Streamlit.
+NBA-only analytics and prediction dashboard. Uses BALLDONTLIE as the primary data provider, with API credentials stored in Streamlit secrets.
 
-## Features
-- NBA schedule and scoreboard refresh
-- Team and player data ingestion through the open-source `nba_api` client
-- Game win-probability estimates and Monte Carlo simulations
-- Player points, rebounds, assists, steals, blocks, and minutes projections when source data is available
-- Recent form, home/away, rest, head-to-head, and matchup context
-- Injury-data freshness warnings; unknown status is never treated as healthy
-- 3–6 leg parlay research board with correlation warnings
-- Prediction history and grading
+## Core capabilities
+- Daily NBA schedule, live/final scores and game status
+- Player game logs and rolling projections for points, rebounds, assists, steals, blocks, threes and minutes
+- Injury report and projected/confirmed starting lineups (GOAT plan endpoints)
+- Sportsbook game odds and player props where provider coverage exists
+- Team recent-form and rest context, historical head-to-head foundation
+- Monte Carlo game simulations
+- Candidate 3–6 leg parlay builder with same-game/player correlation exclusions
+- Prediction history and grading framework
+- Source freshness and API health visibility
 
-## Important limitations
-This project uses free public data sources. NBA Stats endpoints are unofficial, can throttle or block cloud-hosted requests, and are not guaranteed to be continuously available. Injury and lineup data may be incomplete or delayed. The app labels missing/stale inputs and does not guarantee betting results. Model confidence is an estimate, not a guaranteed real-world probability.
+## Data provider
+Recommended: BALLDONTLIE NBA GOAT, currently listed at $39.99/month for NBA. Confirm current terms in your account dashboard before subscribing.
 
-## Run locally
-Python 3.10+
+Create an account at https://app.balldontlie.io/ and add NBA GOAT. API docs: https://docs.balldontlie.io/
 
-```bash
-pip install -r requirements.txt
-streamlit run app.py
-```
+## Configure Streamlit
+In Streamlit Community Cloud → App → Settings → Secrets, add:
 
-No paid API key is required. Data is cached locally in `data/nba_edge.db`.
+    BALLDONTLIE_API_KEY = "paste_your_key_here"
 
-## Deploy
-Deploy the repository as a Streamlit Community Cloud app and set the main file to `app.py`. The GitHub Actions workflow can refresh cached data on a schedule, but scheduled cloud jobs may be subject to provider limits. The dashboard also includes a manual refresh.
+Never commit a real API key to GitHub or paste it into chat.
 
-## Data attribution
-NBA statistics are retrieved from NBA.com endpoints via [`nba_api`](https://github.com/swar/nba_api). Use is subject to NBA.com terms. This is an independent analytics project and is not affiliated with the NBA.
+## Run
+    pip install -r requirements.txt
+    streamlit run app.py
+
+## Model caveats
+Projections are estimates from recent box-score distributions. Small samples, injuries, role changes, lineup uncertainty, blowouts and overtime can invalidate them. The parlay builder is a research shortlist, not a guaranteed hit-rate engine. We must evaluate out-of-sample calibration before trusting model probabilities.
+
+## Hosting
+Deploy on Streamlit Community Cloud with app.py as the entry point. Add the API key through Streamlit Secrets. SQLite on ephemeral hosting may reset; move to managed Postgres before relying on long-term history.
