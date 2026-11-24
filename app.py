@@ -243,6 +243,8 @@ with tabs[8]:
         st.markdown("**Player search**")
         player_query = st.text_input("Player name", placeholder="e.g. Anthony Edwards", key="directory_player_query")
         if st.button("Search players", key="directory_player_search"):
+            st.session_state.pop("directory_players", None)
+            st.session_state.pop("directory_player_query_done", None)
             if not player_query.strip():
                 st.warning("Enter a player name first.")
             else:
@@ -286,6 +288,8 @@ with tabs[8]:
         st.markdown("**Team search**")
         team_query = st.text_input("Team name, city or abbreviation", placeholder="e.g. Lakers, Los Angeles or LAL", key="directory_team_query")
         if st.button("Search teams", key="directory_team_search"):
+            st.session_state.pop("directory_teams", None)
+            st.session_state.pop("directory_team_query_done", None)
             if not team_query.strip():
                 st.warning("Enter a team, city or abbreviation first.")
             else:
