@@ -154,3 +154,8 @@ def player_game_lineup_status(game_id,player_id):
             if int((item.get("player") or {}).get("id",-1))==int(player_id):
                 return {"status":"Listed in projected lineup","source":str(team_row.get("status","projected")),"position":item.get("position")}
     return {"status":"Not listed / unavailable feed","source":"No lineup match; this does not mean inactive","position":None}
+
+
+@st.cache_data(ttl=21600,show_spinner=False)
+def players_for_team(team_id):
+    return pages('/v1/players', {'team_ids[]': int(team_id), 'per_page': 100}, 3)
