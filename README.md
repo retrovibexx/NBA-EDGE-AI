@@ -10,7 +10,8 @@ NBA-only analytics and prediction dashboard. Uses BALLDONTLIE as the primary dat
 - Team recent-form, rest, head-to-head, pace, efficiency and injury-impact context
 - Monte Carlo game simulations
 - Opponent-aware player matchup analysis, head-to-head sample context and role/minutes trend signals
-- Matchup-adjusted player prop estimates with no-vig market shrinkage and sample-size context
+- Matchup-adjusted player prop estimates with no-vig market shrinkage, opponent position defense relative to league positional baselines, head-to-head and role trends
+- Player advanced rates and recent five-player lineup on/off net-rating context when provider coverage and minimum sample thresholds are met
 - Candidate 3–6 leg parlay builder with same-game/player exclusions and diversification scoring
 - Market snapshot journal for tracking your own player-prop line movement over time
 - Probability Brier scores for game and player-prop forecasts; CSV exports for prediction history
