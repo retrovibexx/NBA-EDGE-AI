@@ -20,7 +20,8 @@ def test_evaluate_manual_lines_skips_blank_or_invalid_lines():
     assert prop_engine.evaluate_manual_lines(board)==[]
 
 def test_projection_board_does_not_need_live_props(monkeypatch):
-    monkeypatch.setattr(prop_engine,"players_for_team",lambda team_id: [])
+    monkeypatch.setattr(prop_engine,"_injury_ids",lambda:set())
+    monkeypatch.setattr(prop_engine,"players_for_teams",lambda team_ids: [])
     assert prop_engine.build_player_projection_board([
         {"id":1,"home_team":{"id":2,"abbreviation":"H"},"visitor_team":{"id":3,"abbreviation":"A"}}
     ])==[]
