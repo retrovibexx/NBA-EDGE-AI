@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 from datetime import date
-from bdl import api_key, games_for_date, injuries, projected_lineups, game_lineups, player_props, game_odds, freshness_label
+from bdl import api_key, games_for_date, injuries, projected_lineups, game_lineups, player_props, game_odds, freshness_label, search_players, search_teams, team_games_history, current_season_start
 from model import predict_game, project_player
 from prop_engine import analyze_props
 from parlays import build_candidates
@@ -27,7 +27,7 @@ with st.sidebar:
     st.caption(f"Slate date: {today}")
     st.caption("Provider data timestamps are shown where supplied.")
 
-tabs=st.tabs(["Today's slate","Game lab","Player projections","Injuries & lineups","Parlay builder","Accuracy tracker","Backtesting","Data health"])
+tabs=st.tabs(["Today's slate","Game lab","Player projections","Injuries & lineups","Parlay builder","Accuracy tracker","Backtesting","Data health","Search players & teams"])
 try:
     games=games_for_date(today)
     slate_error=None
@@ -233,3 +233,99 @@ with tabs[7]:
     st.write("Team model: recent scoring margin, team pace/efficiency, home court, rest and a small head-to-head adjustment. Player on/off impact, role-change adjustments and opponent positional defense remain planned upgrades. Walk-forward player-stat backtesting is available in the Backtesting tab.")
     st.write("Cloud SQLite storage may reset on redeploy/restart. For durable season-long accuracy tracking, connect persistent Postgres.")
     st.caption("No model probability is a guarantee. Missing or stale data should reduce confidence, not be silently filled.")
+
+
+with tabs[8]:
+    st.subheader("Search the NBA")
+    st.caption("Look up any player or NBA team by name, nickname, abbreviation or city. This is an additional search area; all existing tabs remain available.")
+    player_col, team_col = st.columns(2)
+    with player_col:
+        st.markdown("**Player search**")
+        player_query = st.text_input("Player name", placeholder="e.g. Anthony Edwards", key="directory_player_query")
+        if st.button("Search players", key="directory_player_search"):
+            if not player_query.strip():
+                st.warning("Enter a player name first.")
+            else:
+                try:
+                    found_players = search_players(player_query.strip())
+                    st.session_state["directory_players"] = found_players
+                    st.session_state["directory_player_query_done"] = player_query.strip()
+                except Exception as e:
+                    st.error(f"Player search failed: {e}")
+        found_players = st.session_state.get("directory_players", [])
+        if found_players:
+            player_options = {
+                f"{p.get('first_name','')} {p.get('last_name','')} · {((p.get('team') or {}).get('abbreviation') or 'Free agent')} · {'Active' if p.get('is_active') else 'Inactive'} · ID {p.get('id')}": p
+                for p in found_players
+            }
+            selected_player_label = st.selectbox("Matching players", list(player_options.keys()), key="directory_player_choice")
+            selected_player = player_options[selected_player_label]
+            st.write(f"**Player:** {selected_player.get('first_name','')} {selected_player.get('last_name','')}")
+            st.write(f"**Team:** {(selected_player.get('team') or {}).get('full_name','Not listed')}")
+            st.write(f"**Position:** {selected_player.get('position') or 'Not listed'}")
+            st.write(f"**Active:** {'Yes' if selected_player.get('is_active') else 'No'}")
+            st.caption(f"Provider player ID: {selected_player.get('id')}")
+            quick_stat = st.selectbox("Quick projection stat", ["PTS","REB","AST","STL","BLK","MIN","3PM"], key="directory_player_stat")
+            if st.button("Project selected player", key="directory_player_project"):
+                with st.spinner("Calculating player projection…"):
+                    try:
+                        result = project_player(f"{selected_player.get('first_name','')} {selected_player.get('last_name','')}", quick_stat)
+                        if result.get("error"):
+                            st.error(result["error"])
+                        else:
+                            st.metric(f"{result['player']} projected {quick_stat}", f"{result['projection']:.1f}")
+                            a,b,d = st.columns(3)
+                            a.metric("Last 5 average", f"{result['last5']:.1f}")
+                            b.metric("Last 10 average", f"{result['last10']:.1f}")
+                            d.metric("Projected minutes", f"{result['minutes']:.1f}" if result["minutes"] else "Unavailable")
+                    except Exception as e:
+                        st.error(f"Projection failed: {e}")
+        elif st.session_state.get("directory_player_query_done"):
+            st.info("No player matches returned. Try a shorter name or surname.")
+    with team_col:
+        st.markdown("**Team search**")
+        team_query = st.text_input("Team name, city or abbreviation", placeholder="e.g. Lakers, Los Angeles or LAL", key="directory_team_query")
+        if st.button("Search teams", key="directory_team_search"):
+            if not team_query.strip():
+                st.warning("Enter a team, city or abbreviation first.")
+            else:
+                try:
+                    found_teams = search_teams(team_query.strip())
+                    st.session_state["directory_teams"] = found_teams
+                    st.session_state["directory_team_query_done"] = team_query.strip()
+                except Exception as e:
+                    st.error(f"Team search failed: {e}")
+        found_teams = st.session_state.get("directory_teams", [])
+        if found_teams:
+            team_options = {f"{t.get('full_name', t.get('name','NBA Team'))} · {t.get('abbreviation','')}": t for t in found_teams}
+            selected_team_label = st.selectbox("Matching teams", list(team_options.keys()), key="directory_team_choice")
+            selected_team = team_options[selected_team_label]
+            st.write(f"**Team:** {selected_team.get('full_name', selected_team.get('name',''))}")
+            st.write(f"**Abbreviation:** {selected_team.get('abbreviation','—')}")
+            st.write(f"**City:** {selected_team.get('city','—')}")
+            st.write(f"**Conference:** {selected_team.get('conference','—')}")
+            st.write(f"**Division:** {selected_team.get('division','—')}")
+            if st.button("Load recent team results", key="directory_team_results"):
+                with st.spinner("Loading recent team schedule…"):
+                    try:
+                        team_rows = team_games_history(selected_team["id"], current_season_start())
+                        finals = [g for g in team_rows if g.get("status_state") == "final" or str(g.get("status","")).lower() == "final"]
+                        result_rows = []
+                        for game in finals[:10]:
+                            home = game.get("home_team") or {}
+                            away = game.get("visitor_team") or {}
+                            is_home = home.get("id") == selected_team["id"]
+                            own_score = game.get("home_team_score") if is_home else game.get("visitor_team_score")
+                            opp_score = game.get("visitor_team_score") if is_home else game.get("home_team_score")
+                            opponent = away.get("full_name","") if is_home else home.get("full_name","")
+                            result_rows.append({"Date":game.get("date",""),"Opponent":opponent,"Location":"Home" if is_home else "Away","Score":f"{own_score}-{opp_score}","Result":"W" if own_score is not None and opp_score is not None and own_score > opp_score else "L"})
+                        if result_rows:
+                            st.dataframe(pd.DataFrame(result_rows), use_container_width=True, hide_index=True)
+                            wins = sum(1 for row in result_rows if row["Result"] == "W")
+                            st.metric("Last 10 completed games", f"{wins}-{len(result_rows)-wins}")
+                        else:
+                            st.info("No completed team games were returned for the current season.")
+                    except Exception as e:
+                        st.error(f"Could not load team results: {e}")
+        elif st.session_state.get("directory_team_query_done"):
+            st.info("No team matches returned. Try a nickname, city or three-letter abbreviation.")
