@@ -64,3 +64,13 @@ def freshness_label(iso):
         mins=(datetime.now(timezone.utc)-dt).total_seconds()/60
         return f"Updated {int(max(0,mins))} min ago"
     except Exception: return str(iso)
+
+@st.cache_data(ttl=21600,show_spinner=False)
+def team_advanced_averages(team_id,season):
+    return pages("/nba/v1/team_season_averages/general",{"season":season,"season_type":"regular","type":"advanced","team_ids[]":int(team_id),"per_page":100},2)
+@st.cache_data(ttl=21600,show_spinner=False)
+def team_base_averages(team_id,season):
+    return pages("/nba/v1/team_season_averages/general",{"season":season,"season_type":"regular","type":"base","team_ids[]":int(team_id),"per_page":100},2)
+@st.cache_data(ttl=300,show_spinner=False)
+def game_lineups(game_id):
+    return pages("/nba/v1/lineups",{"game_ids[]":int(game_id),"per_page":100},2)
