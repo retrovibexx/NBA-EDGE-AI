@@ -1,6 +1,7 @@
 import numpy as np
 from bdl import player_game_stats, current_season_start, player_by_id
 from features import player_rows, rolling_projection, empirical_over_probability, as_float
+from matchup_engine import analyze_matchup
 
 STAT_FOR_PROP={"points":"PTS","rebounds":"REB","assists":"AST","steals":"STL","blocks":"BLK","threes":"3PM","points_rebounds":"PTS","points_assists":"PTS","points_rebounds_assists":"PTS","rebounds_assists":"REB"}
 COMBO_KEYS={"points_rebounds":["pts","reb"],"points_assists":["pts","ast"],"points_rebounds_assists":["pts","reb","ast"],"rebounds_assists":["reb","ast"]}
@@ -37,6 +38,21 @@ def analyze_props(game,props,max_players=35):
                 proj=rolling_projection(logs,stat)
                 if not proj: continue
                 values=proj["values"]; projection=float(proj["projection"])
+            player=prop.get("player") or player_by_id(pid)
+            team_id=(player.get("team") or {}).get("id")
+            home_id=(game.get("home_team") or {}).get("id")
+            away_id=(game.get("visitor_team") or {}).get("id")
+            opponent_id=away_id if team_id==home_id else home_id if team_id==away_id else None
+            matchup=None
+            if opponent_id is not None:
+                try:
+                    matchup=analyze_matchup(pid,opponent_id,stat,current_season_start())
+                    if matchup and not matchup.get("error"):
+                        delta=float(matchup["adjusted_projection"])-float(matchup["base_projection"])
+                        projection=max(0.0,projection+delta)
+                        values=[float(v)+delta for v in values]
+                except Exception:
+                    matchup=None
             over=empirical_over_probability(values,float(line))
             if over is None: continue
             market=prop.get("market") or {}
@@ -55,7 +71,7 @@ def analyze_props(game,props,max_players=35):
             probability=over_est if direction=="over" else 1-over_est
             edge=max(over_edge,under_edge)
             player=prop.get("player") or player_by_id(pid)
-            results.append({"game_id":game["id"],"player_id":pid,"player":f"{player.get('first_name','Player')} {player.get('last_name','')}","market":kind,"line":float(line),"direction":direction,"probability":float(probability),"projection":projection,"edge":float(edge),"vendor":prop.get("vendor",""),"updated_at":prop.get("updated_at"),"sample":len(values),"source":"BALLDONTLIE player props + recent game logs"})
+            results.append({"game_id":game["id"],"player_id":pid,"player":f"{player.get('first_name','Player')} {player.get('last_name','')}","market":kind,"line":float(line),"direction":direction,"probability":float(probability),"projection":projection,"edge":float(edge),"vendor":prop.get("vendor",""),"updated_at":prop.get("updated_at"),"sample":len(values),"role_signal":role_label,"matchup_adjustment":round(float(matchup["adjusted_projection"])-float(matchup["base_projection"]),2) if matchup and not matchup.get("error") else None,"h2h_games":(matchup or {}).get("h2h_games",0),"source":"BALLDONTLIE player props + matchup-adjusted recent game logs"})
         except Exception:
             continue
     return sorted(results,key=lambda x:x["edge"],reverse=True)
