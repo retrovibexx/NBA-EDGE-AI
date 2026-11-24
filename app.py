@@ -241,7 +241,10 @@ with tabs[7]:
     st.write("Injuries and lineups: BALLDONTLIE GOAT endpoints; always inspect status and updated_at.")
     st.write("Player props: live market snapshot. Provider notes that props are not historically stored and may disappear as games near completion.")
     st.write("Team model: recent scoring margin, team pace/efficiency, home court, rest and a small head-to-head adjustment. Player on/off impact, role-change adjustments and opponent positional defense remain planned upgrades. Walk-forward player-stat backtesting is available in the Backtesting tab.")
-    st.write("Cloud SQLite storage may reset on redeploy/restart. For durable season-long accuracy tracking, connect persistent Postgres.")
+    from storage import get_engine
+    storage_type = get_engine().dialect.name
+    st.write(f"Storage backend: {storage_type.upper()} · {'persistent managed database' if storage_type == 'postgresql' else 'local SQLite; hosted resets may clear history'}")
+    st.write("For persistent history on Streamlit Cloud, configure DATABASE_URL with a managed PostgreSQL connection string in Streamlit Secrets.")
     st.caption("No model probability is a guarantee. Missing or stale data should reduce confidence, not be silently filled.")
 
 
@@ -442,4 +445,5 @@ with tabs[10]:
             st.info("No snapshots yet. Capture the current slate now, then capture again later to see changes.")
     except Exception as e:
         st.error(f"Movement history unavailable: {e}")
-    st.warning("This is a local snapshot journal, not a full sportsbook tick history. SQLite storage on hosted Streamlit may reset on redeploy; export your history or connect persistent storage before relying on it long term.")
+    from storage import get_engine
+    st.warning(f"This is your own snapshot journal, not a full sportsbook tick history. Storage: {get_engine().dialect.name.upper()}. Configure DATABASE_URL for durable PostgreSQL history on hosted Streamlit.")
