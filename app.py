@@ -3,7 +3,7 @@ import pandas as pd
 from datetime import date
 from bdl import api_key, games_for_date, injuries, projected_lineups, game_lineups, game_odds, freshness_label, search_players, search_teams, team_games_history, current_season_start
 from model import predict_game, project_player
-from prop_engine import build_player_projection_board, evaluate_manual_lines
+from prop_engine import build_player_projection_board, build_model_legs, evaluate_manual_lines
 from parlays import build_candidates
 from tracker import init_db, save_game_prediction, save_prop_prediction, load_predictions, grade_completed
 from matchup_engine import analyze_matchup, team_injury_context
@@ -72,7 +72,7 @@ with tabs[1]:
         g=game_labels[selected]
         away=g["visitor_team"]; home=g["home_team"]
         sims=st.slider("Simulations",2000,50000,15000,1000)
-        can_predict=(g.get("status_state")=="scheduled")
+        can_predict=(g.get("status_state")=="scheduled" or (not g.get("status_state") and str(g.get("status","")).lower() not in ("final","in progress","live") and str(g.get("date",today)) >= today))
         if not can_predict:
             st.warning("Only upcoming scheduled games can be forecast. Live and completed games are excluded to prevent result leakage.")
         if st.button("Run matchup simulation",type="primary",disabled=not can_predict):
@@ -159,10 +159,23 @@ with tabs[4]:
                 try:
                     board=build_player_projection_board(games)
                     st.session_state['model_player_board']=board
-                    st.session_state.pop('model_prop_legs',None)
-                    if board: st.success(f'Built {len(board)} player-stat projections.')
+                    st.session_state['model_prop_legs']=build_model_legs(board)
+                    if board: st.success(f'Built {len(board)} player-stat projections and {len(st.session_state[\"model_prop_legs\"])} model-generated legs.')
                     else: st.warning('No player projections returned. Check Data Health and player/team game-log access.')
                 except Exception as e: st.error(f'Projection board failed: {type(e).__name__}: {e}')
+    if st.session_state.get('model_prop_legs'):
+        st.subheader('AI-generated parlay candidates')
+        st.caption('Suggested target lines are calculated from player game logs, projected minutes, role trend and available opponent defense/pace data. They are model targets, not confirmed sportsbook lines.')
+        auto_legs=st.session_state['model_prop_legs']
+        auto_candidates=build_candidates(auto_legs,leg_count,10)
+        if auto_candidates:
+            for i,candidate in enumerate(auto_candidates[:5]):
+                with st.expander(f"AI parlay {i+1} · {candidate['mean_edge']:.1%} average model separation"):
+                    for leg in candidate['legs']:
+                        st.write(f"{leg['player']} — {leg['direction'].upper()} {leg['line']} {leg['market']} · projection {leg['projection']:.1f} · recent-sample estimate {leg['probability']:.1%} · {leg['matchup']}")
+                    st.caption(candidate['warning'] + " Check that each suggested line is available at your sportsbook.")
+        else:
+            st.info(f"Not enough different games with supported player samples for a {leg_count}-leg parlay. Try fewer legs or another slate.")
     raw_board=st.session_state.get('model_player_board',[])
     if raw_board:
         st.write('Enter a sportsbook line for each player/stat you want to evaluate. Leave unused rows blank.')
@@ -193,7 +206,7 @@ with tabs[4]:
                         for leg in candidate['legs']: save_prop_prediction(leg['game_id'],leg)
                         st.success('Saved legs for post-game grading.')
         else: st.info('Not enough distinct games with entered lines and supported samples for this parlay size.')
-    else: st.info('Build the projection board, enter sportsbook lines, then evaluate them. No live props or odds API is needed.')
+    else: st.info('Build the projection board to generate AI parlays automatically. You can also enter sportsbook lines below for comparison.')
 with tabs[5]:
     st.subheader("Accuracy tracker")
     if st.button("Grade all completed games and props"):
