@@ -240,7 +240,7 @@ with tabs[7]:
     st.write(f"Schedule: {'Loaded' if games else 'No records returned'} · {today}")
     st.write("Injuries and lineups: BALLDONTLIE GOAT endpoints; always inspect status and updated_at.")
     st.write("Player props: live market snapshot. Provider notes that props are not historically stored and may disappear as games near completion.")
-    st.write("Team model: recent scoring margin, pace/efficiency, home court, rest and head-to-head context. Player prop estimates now include opponent team defensive rating, player H2H sample and recent minutes/usage trend signals. Full lineup on/off impact and opponent positional-defense models remain future upgrades. Walk-forward player-stat backtesting is available in the Backtesting tab.")
+    st.write("Team model: recent scoring margin, pace/efficiency, home court, rest and head-to-head context. Player prop estimates now include opponent team defensive rating, recent opponent production allowed by player position (relative to league positional baselines), player H2H sample and recent minutes/usage trends. The Matchup & Role Lab also shows five-player lineup on/off net ratings and advanced player rates when coverage and minimum samples are available. Walk-forward player-stat backtesting is available in the Backtesting tab.")
     from storage import get_engine
     storage_type = get_engine().dialect.name
     st.write(f"Storage backend: {storage_type.upper()} · {'persistent managed database' if storage_type == 'postgresql' else 'local SQLite; hosted resets may clear history'}")
