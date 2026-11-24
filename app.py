@@ -150,7 +150,7 @@ with tabs[3]:
         except Exception as e: st.error(f"Lineup feed unavailable: {e}")
 with tabs[4]:
     st.subheader('Model-only parlay research')
-    st.caption('No sportsbook feed is used. The model projects players from recent game logs; enter the lines offered by your sportsbook to evaluate Over/Under candidates.')
+    st.caption('No sportsbook feed is required. AI parlays are generated from player game logs, recent minutes and role trends. Optional opponent advanced feeds are skipped to respect your 5-requests-per-minute provider limit.')
     leg_count=st.slider('Parlay size',3,6,3,key='parlay_size')
     if st.button('Build player projection board',type='primary'):
         if not games: st.warning('No games are available for this date.')
@@ -206,7 +206,7 @@ with tabs[4]:
                         for leg in candidate['legs']: save_prop_prediction(leg['game_id'],leg)
                         st.success('Saved legs for post-game grading.')
         else: st.info('Not enough distinct games with entered lines and supported samples for this parlay size.')
-    else: st.info('Build the projection board to generate AI parlays automatically. You can also enter sportsbook lines below for comparison.')
+    else: st.info('Tap Build player projection board above. It will generate the player projections and AI parlay candidates in the same run; no sportsbook lines or odds feed are required.')
 with tabs[5]:
     st.subheader("Accuracy tracker")
     if st.button("Grade all completed games and props"):
