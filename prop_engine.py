@@ -32,7 +32,7 @@ def _injury_ids():
     except Exception:
         return set()
 
-def build_player_projection_board(games, max_players_per_team=12):
+def build_player_projection_board(games, max_players_per_team=8):
     """Fetch slate rosters and player logs in bulk; optional context never blocks the board."""
     season = current_season_start()
     unavailable = _injury_ids()
@@ -61,7 +61,7 @@ def build_player_projection_board(games, max_players_per_team=12):
             roster_by_team.setdefault(int(team_id), []).append(player)
     board = []
     for team_id, (team, opponent, game) in teams.items():
-        context = _optional_opponent_context(opponent.get("id"), season) if opponent.get("id") else {}
+        # Do not make one advanced-stats API call per opponent: the user plan is capped at 5 RPM.\n        # Core projections remain data-driven from player logs, minutes and role trend.\n        context = {}
         eligible = []
         for player in roster_by_team.get(team_id, []):
             logs = player_rows(by_player.get(int(player["id"]), []))
@@ -112,7 +112,7 @@ def build_player_projection_board(games, max_players_per_team=12):
                 })
     return sorted(board, key=lambda x: (x["minutes"], x["sample"]), reverse=True)
 
-def build_model_legs(board, min_sample=8, min_probability=0.58):
+def build_model_legs(board, min_sample=6, min_probability=0.55):
     legs = []
     for row in board:
         values = np.asarray(row.get("_values") or [], dtype=float)
