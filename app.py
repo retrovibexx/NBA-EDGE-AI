@@ -390,6 +390,32 @@ with tabs[9]:
             e.metric("Prior minutes", f"{result['role']['prior_minutes']:.1f}" if result['role']['prior_minutes'] is not None else "N/A")
             g.metric("Minutes change", f"{result['role']['minutes_change']:+.1f}" if result['role']['minutes_change'] is not None else "N/A")
             st.write(f"Opponent defensive rating: {result['opponent_def_rating'] if result['opponent_def_rating'] is not None else 'Unavailable'} · Pace: {result['opponent_pace'] if result['opponent_pace'] is not None else 'Unavailable'} · Player log sample: {result['sample']}")
+            pos = result.get("positional_defense") or {}
+            allowed = pos.get("allowed_per36") or {}
+            st.markdown(f"**Opponent defense vs {result.get('position') or 'unknown position'}** · {pos.get('opponent_games',0)} recent games · {pos.get('player_game_rows',0)} opponent player-game rows")
+            pos_keys = [("pts","PTS allowed/36"),("reb","REB allowed/36"),("ast","AST allowed/36"),("fg3m","3PM allowed/36")]
+            cols = st.columns(4)
+            for col,(key,label) in zip(cols,pos_keys):
+                value = allowed.get(key)
+                col.metric(label, f"{value:.1f}" if value is not None else "N/A")
+            st.caption(f"Positional adjustment to projection: {result.get('positional_adjustment',0):+.2f} · League positional baseline: {result.get('positional_baseline_per36') if result.get('positional_baseline_per36') is not None else 'Unavailable'}")
+            lineup = result.get("lineup_impact") or {}
+            st.markdown("**Player on/off lineup performance**")
+            if lineup.get("net_diff") is not None:
+                x,y,z = st.columns(3)
+                x.metric("Net rating with player", f"{lineup['on_net']:.1f}")
+                y.metric("Without player", f"{lineup['off_net']:.1f}")
+                z.metric("On/off difference", f"{lineup['net_diff']:+.1f}")
+                st.caption(f"Weighted over {lineup.get('games',0)} recent team games · {lineup.get('on_minutes',0):.0f} on-court lineup minutes and {lineup.get('off_minutes',0):.0f} off-court lineup minutes. Descriptive, not causal.")
+            else:
+                st.info("On/off split unavailable or below minimum sample (at least 60 lineup minutes and 3 lineup rows both with and without the player).")
+            advanced = result.get("advanced") or {}
+            if advanced:
+                st.markdown("**Player advanced profile (season game-level averages)**")
+                adv_cols = st.columns(4)
+                for col,(key,label) in zip(adv_cols,[("usage_percentage","Usage"),("true_shooting_percentage","True shooting"),("net_rating","Net rating"),("matchup_fg_pct","Matchup FG%")]):
+                    value = advanced.get(key)
+                    col.metric(label, f"{value:.3f}" if value is not None and abs(value)<2 else (f"{value:.1f}" if value is not None else "N/A"))
             st.caption(result["note"])
     st.divider()
     st.markdown("**Current injury list for a team**")
