@@ -5,7 +5,7 @@ DB=Path("data/nba_edge.db"); DB.parent.mkdir(parents=True,exist_ok=True)
 def init_db():
     with sqlite3.connect(DB) as c:
         c.execute("""CREATE TABLE IF NOT EXISTS predictions(id INTEGER PRIMARY KEY AUTOINCREMENT,created_at TEXT DEFAULT CURRENT_TIMESTAMP,game_id INTEGER,away TEXT,home TEXT,p_away REAL,p_home REAL,predicted_margin REAL,actual_winner TEXT,graded INTEGER DEFAULT 0,source TEXT)""")
-        c.execute("""CREATE TABLE IF NOT EXISTS prop_predictions(id INTEGER PRIMARY KEY AUTOINCREMENT,created_at TEXT DEFAULT CURRENT_TIMESTAMP,game_id INTEGER,player_id INTEGER,player TEXT,market TEXT,line REAL,direction TEXT,probability REAL,projection REAL,actual_value REAL,graded INTEGER DEFAULT 0,source TEXT)""")
+        c.execute("""CREATE TABLE IF NOT EXISTS prop_predictions(id INTEGER PRIMARY KEY AUTOINCREMENT,created_at TEXT DEFAULT CURRENT_TIMESTAMP,game_id INTEGER,player_id INTEGER,player TEXT,market TEXT,line REAL,direction TEXT,probability REAL,projection REAL,actual_value REAL,graded INTEGER DEFAULT 0,source TEXT,hit INTEGER)""")\n        try: c.execute("ALTER TABLE prop_predictions ADD COLUMN hit INTEGER")\n        except sqlite3.OperationalError: pass
 def save_game_prediction(game,result):
     init_db()
     with sqlite3.connect(DB) as c: c.execute("INSERT INTO predictions(game_id,away,home,p_away,p_home,predicted_margin,source) VALUES(?,?,?,?,?,?,?)",(game["id"],game["visitor_team"]["full_name"],game["home_team"]["full_name"],result["away_win"],result["home_win"],result["home_margin"],"BALLDONTLIE + NBA Edge model"))
@@ -46,7 +46,7 @@ def grade_completed():
                 elif market=="points_rebounds_assists": actual=float(stats.get("pts",0) or 0)+float(stats.get("reb",0) or 0)+float(stats.get("ast",0) or 0)
                 elif market=="rebounds_assists": actual=float(stats.get("reb",0) or 0)+float(stats.get("ast",0) or 0)
                 won=(actual>float(row["line"])) if row["direction"]=="over" else (actual<float(row["line"]))
-                c.execute("UPDATE prop_predictions SET actual_value=?,graded=1 WHERE id=?",(actual,int(row["id"])))
+                c.execute("UPDATE prop_predictions SET actual_value=?,graded=1,hit=? WHERE id=?",(actual,1 if won else 0,int(row["id"])))
                 graded_props+=1
             except Exception: continue
     return {"games_graded":graded_games,"props_graded":graded_props,"still_pending":pending}
