@@ -231,13 +231,15 @@ with tabs[5]:
             st.markdown("**Game winner predictions**")
             st.dataframe(game_hist,use_container_width=True,hide_index=True)
             st.download_button("Download game prediction history CSV", game_hist.to_csv(index=False).encode("utf-8"), "nba_game_predictions.csv", "text/csv")
-            graded=game_hist[game_hist["graded"]==1]
+            graded=game_hist[game_hist["graded"]==1].copy()
             if len(graded):
                 correct=((graded.apply(lambda r: (r["home"] if r["p_home"]>=0.5 else r["away"])==r["actual_winner"],axis=1))).mean()
                 st.metric("Winner-direction accuracy",f"{correct:.1%}",f"{len(graded)} graded")
-            graded["actual_home_win"] = (graded["actual_winner"] == graded["home"]).astype(float)
-            game_brier = ((graded["p_home"] - graded["actual_home_win"]) ** 2).mean()
-            st.metric("Game probability Brier score", f"{game_brier:.3f}", "Lower is better; 0 is perfect")
+                graded["actual_home_win"] = (graded["actual_winner"] == graded["home"]).astype(float)
+                game_brier = ((graded["p_home"] - graded["actual_home_win"]) ** 2).mean()
+                st.metric("Game probability Brier score", f"{game_brier:.3f}", "Lower is better; 0 is perfect")
+            else:
+                st.info("No completed game predictions have been graded yet.")
         if not prop_hist.empty:
             st.markdown("**Player prop predictions**")
             st.dataframe(prop_hist,use_container_width=True,hide_index=True)
@@ -258,6 +260,16 @@ with tabs[5]:
                     player_rows=player_rows.sort_values(["Hit rate","Graded props"],ascending=[False,False])
                     st.markdown("**Player consistency leaderboard (saved props only)**")
                     st.dataframe(player_rows,use_container_width=True,hide_index=True)
+                if "probability" in graded_props:
+                    calibration=graded_props.dropna(subset=["probability","hit"]).copy()
+                    if not calibration.empty:
+                        calibration["Confidence band"]=pd.cut(calibration["probability"],[0,.5,.6,.7,.8,.9,1.000001],include_lowest=True)
+                        reliability=calibration.groupby("Confidence band",observed=False).agg(
+                            **{"Average predicted probability":("probability","mean"),
+                               "Actual hit rate":("hit","mean"),"Graded props":("hit","count")}
+                        ).reset_index()
+                        st.markdown("**Probability calibration (predicted vs. actual)**")
+                        st.dataframe(reliability,use_container_width=True,hide_index=True)
         if game_hist.empty and prop_hist.empty: st.info("Save predictions before games to start the record.")
     except Exception as e: st.error(f"History unavailable: {e}")
 with tabs[6]:
