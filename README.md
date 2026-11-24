@@ -36,7 +36,7 @@ GitHub Actions runs the unit tests on pushes and pull requests. A separate hourl
     streamlit run app.py
 
 ## Model caveats
-Projections are estimates from recent box-score distributions. Small samples, injuries, role changes, lineup uncertainty, blowouts and overtime can invalidate them. The parlay builder is a research shortlist, not a guaranteed hit-rate engine. We must evaluate out-of-sample calibration before trusting model probabilities.
+Projections are estimates from recent box-score distributions. Injury adjustments are heuristic weights based on season production and reported status, not official player-value ratings. Small samples, injuries, role changes, lineup uncertainty, blowouts and overtime can invalidate them. The parlay builder is a research shortlist, not a guaranteed hit-rate engine. We must evaluate out-of-sample calibration before trusting model probabilities.
 
 ## Hosting
 Deploy on Streamlit Community Cloud with app.py as the entry point. Add the API key through Streamlit Secrets. SQLite on ephemeral hosting may reset; move to managed Postgres before relying on long-term history.
