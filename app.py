@@ -6,6 +6,8 @@ from model import predict_game, project_player
 from prop_engine import analyze_props
 from parlays import build_candidates
 from tracker import init_db, save_game_prediction, save_prop_prediction, load_predictions, grade_completed
+from matchup_engine import analyze_matchup, team_injury_context
+from odds_monitor import record_snapshot, movement_history
 
 st.set_page_config(page_title="NBA Edge AI",page_icon="🏀",layout="wide")
 init_db()
@@ -27,7 +29,7 @@ with st.sidebar:
     st.caption(f"Slate date: {today}")
     st.caption("Provider data timestamps are shown where supplied.")
 
-tabs=st.tabs(["Today's slate","Game lab","Player projections","Injuries & lineups","Parlay builder","Accuracy tracker","Backtesting","Data health","Search players & teams"])
+tabs=st.tabs(["Today's slate","Game lab","Player projections","Injuries & lineups","Parlay builder","Accuracy tracker","Backtesting","Data health","Search players & teams","Matchup & role lab","Odds movement"])
 try:
     games=games_for_date(today)
     slate_error=None
@@ -333,3 +335,103 @@ with tabs[8]:
                         st.error(f"Could not load team results: {e}")
         elif st.session_state.get("directory_team_query_done"):
             st.info("No team matches returned. Try a nickname, city or three-letter abbreviation.")
+
+
+with tabs[9]:
+    st.subheader("Opponent matchup and role-change lab")
+    st.caption("Combines recent player logs, opponent team defensive rating, head-to-head history and recent minutes/opportunity trends. Contextual adjustments are deliberately conservative.")
+    query = st.text_input("Search player for matchup", placeholder="e.g. Shai Gilgeous-Alexander", key="matchup_player_query")
+    if st.button("Find matchup player", key="matchup_player_search"):
+        try:
+            st.session_state["matchup_players"] = search_players(query.strip()) if query.strip() else []
+        except Exception as e:
+            st.error(f"Player lookup failed: {e}")
+    player_matches = st.session_state.get("matchup_players", [])
+    teams_for_matchup = search_teams("") if player_matches else []
+    if player_matches and teams_for_matchup:
+        player_map = {f"{x.get('first_name','')} {x.get('last_name','')} · {(x.get('team') or {}).get('abbreviation','FA')} · ID {x.get('id')}":x for x in player_matches}
+        selected_matchup_player = player_map[st.selectbox("Player", list(player_map.keys()), key="matchup_player_pick")]
+        team_map = {f"{x.get('full_name',x.get('name','Team'))} · {x.get('abbreviation','')}":x for x in teams_for_matchup}
+        opponent = team_map[st.selectbox("Opponent", list(team_map.keys()), key="matchup_opponent_pick")]
+        matchup_stat = st.selectbox("Projection stat", ["PTS","REB","AST","STL","BLK","MIN","3PM"], key="matchup_stat")
+        if st.button("Analyze player vs opponent", type="primary", key="run_matchup"):
+            with st.spinner("Reviewing player history, opponent defense and rotation trends…"):
+                try:
+                    result = analyze_matchup(selected_matchup_player["id"], opponent["id"], matchup_stat)
+                    st.session_state["matchup_result"] = result
+                    st.session_state["matchup_player_name"] = f"{selected_matchup_player.get('first_name','')} {selected_matchup_player.get('last_name','')}"
+                    st.session_state["matchup_opponent_name"] = opponent.get("full_name", opponent.get("name","Opponent"))
+                except Exception as e:
+                    st.error(f"Matchup analysis failed: {e}")
+    result = st.session_state.get("matchup_result")
+    if result:
+        if result.get("error"):
+            st.warning(result["error"])
+        else:
+            st.markdown(f"**{st.session_state.get('matchup_player_name','Player')} vs {st.session_state.get('matchup_opponent_name','Opponent')}**")
+            a,b,c = st.columns(3)
+            a.metric("Base projection", f"{result['base_projection']:.1f}")
+            b.metric("Context-adjusted estimate", f"{result['adjusted_projection']:.1f}", f"{result['adjusted_projection']-result['base_projection']:+.1f}")
+            c.metric("H2H sample", f"{result['h2h_games']} games", f"{result['h2h_mean']:.1f} avg" if result["h2h_mean"] is not None else "No sample")
+            st.write(f"**Rotation signal:** {result['role']['label']}")
+            d,e,g = st.columns(3)
+            d.metric("Recent minutes (L5)", f"{result['role']['recent_minutes']:.1f}" if result['role']['recent_minutes'] is not None else "N/A")
+            e.metric("Prior minutes", f"{result['role']['prior_minutes']:.1f}" if result['role']['prior_minutes'] is not None else "N/A")
+            g.metric("Minutes change", f"{result['role']['minutes_change']:+.1f}" if result['role']['minutes_change'] is not None else "N/A")
+            st.write(f"Opponent defensive rating: {result['opponent_def_rating'] if result['opponent_def_rating'] is not None else 'Unavailable'} · Pace: {result['opponent_pace'] if result['opponent_pace'] is not None else 'Unavailable'} · Player log sample: {result['sample']}")
+            st.caption(result["note"])
+    st.divider()
+    st.markdown("**Current injury list for a team**")
+    injury_team_query = st.text_input("Team abbreviation or city", placeholder="e.g. BOS", key="injury_context_team")
+    if st.button("Check team injury context", key="injury_context_button"):
+        try:
+            matches = search_teams(injury_team_query.strip())
+            if matches:
+                st.session_state["injury_context_rows"] = team_injury_context(matches[0]["id"])
+                st.session_state["injury_context_name"] = matches[0].get("full_name", matches[0].get("name","Team"))
+            else:
+                st.session_state["injury_context_rows"] = None
+                st.warning("No team matched that search.")
+        except Exception as e:
+            st.error(f"Injury context unavailable: {e}")
+    if st.session_state.get("injury_context_rows") is not None:
+        st.write(st.session_state.get("injury_context_name","Team"))
+        if st.session_state["injury_context_rows"]:
+            st.dataframe(pd.DataFrame(st.session_state["injury_context_rows"]), use_container_width=True, hide_index=True)
+        else:
+            st.info("No injury records returned for this team.")
+
+with tabs[10]:
+    st.subheader("Odds and line-movement monitor")
+    st.caption("The provider does not supply a historical props archive here. This tab builds your own local snapshot history from the moments you capture; movement starts after the first capture.")
+    if st.button("Capture current slate market snapshot", type="primary", key="capture_odds_snapshot"):
+        saved = 0
+        try:
+            game_markets = game_odds(today)
+            for market_row in game_markets:
+                gid = market_row.get("game_id")
+                if gid is not None:
+                    saved += record_snapshot(gid, game_odds=[market_row])
+            for game in games:
+                try:
+                    current_props = player_props(game["id"])
+                    saved += record_snapshot(game["id"], props=current_props)
+                except Exception:
+                    continue
+            st.success(f"Captured {saved} market rows. Capture again later to compare movement.")
+        except Exception as e:
+            st.error(f"Snapshot capture failed: {e}")
+    try:
+        movement = movement_history()
+        if movement:
+            frame = pd.DataFrame(movement)
+            display_cols = [x for x in ["player","market","vendor","snapshot_type","opening_line","latest_line","line_change","latest_over","latest_under","first_at","latest_at"] if x in frame.columns]
+            st.dataframe(frame[display_cols], use_container_width=True, hide_index=True)
+            if "line_change" in frame.columns:
+                moved = frame[frame["line_change"].fillna(0) != 0]
+                st.metric("Markets with a recorded line change", len(moved))
+        else:
+            st.info("No snapshots yet. Capture the current slate now, then capture again later to see changes.")
+    except Exception as e:
+        st.error(f"Movement history unavailable: {e}")
+    st.warning("This is a local snapshot journal, not a full sportsbook tick history. SQLite storage on hosted Streamlit may reset on redeploy; export your history or connect persistent storage before relying on it long term.")
