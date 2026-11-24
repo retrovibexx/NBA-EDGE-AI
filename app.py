@@ -1,9 +1,9 @@
 import streamlit as st
 import pandas as pd
 from datetime import date
-from bdl import api_key, games_for_date, injuries, projected_lineups, game_lineups, player_props, game_odds, freshness_label, search_players, search_teams, team_games_history, current_season_start
+from bdl import api_key, games_for_date, injuries, projected_lineups, game_lineups, game_odds, freshness_label, search_players, search_teams, team_games_history, current_season_start
 from model import predict_game, project_player
-from prop_engine import analyze_props
+from prop_engine import build_player_projection_board, evaluate_manual_lines
 from parlays import build_candidates
 from tracker import init_db, save_game_prediction, save_prop_prediction, load_predictions, grade_completed
 from matchup_engine import analyze_matchup, team_injury_context
@@ -149,41 +149,51 @@ with tabs[3]:
             else: st.info("No official lineup records returned yet.")
         except Exception as e: st.error(f"Lineup feed unavailable: {e}")
 with tabs[4]:
-    st.subheader("Automatic 3–6 leg parlay research")
-    st.caption("The builder compares recent player outcomes with current prop lines and removes repeated players and same-game combinations. It is not a guarantee of winning.")
-    leg_count=st.slider("Parlay size",3,6,3,key="parlay_size")
-    if st.button("Scan today's player props",type="primary"):
-        candidates_legs=[]
-        progress=st.progress(0)
-        if not games: st.warning("No games available to scan.")
+    st.subheader('Model-only parlay research')
+    st.caption('No sportsbook feed is used. The model projects players from recent game logs; enter the lines offered by your sportsbook to evaluate Over/Under candidates.')
+    leg_count=st.slider('Parlay size',3,6,3,key='parlay_size')
+    if st.button('Build player projection board',type='primary'):
+        if not games: st.warning('No games are available for this date.')
         else:
-            for i,g in enumerate(games):
+            with st.spinner('Loading team rosters and recent player game logs…'):
                 try:
-                    props=player_props(g["id"])
-                    candidates_legs.extend(analyze_props(g,props,max_players=25))
-                except Exception as e:
-                    st.caption(f"Props unavailable for game {g.get('id')}: {e}")
-                progress.progress((i+1)/len(games))
-            st.session_state["prop_legs"]=candidates_legs
-            st.session_state["prop_candidates"]=build_candidates(candidates_legs,leg_count,20)
-            st.success(f"Scanned {len(candidates_legs)} modelled prop candidates.")
-    legs=st.session_state.get("prop_legs",[])
+                    board=build_player_projection_board(games)
+                    st.session_state['model_player_board']=board
+                    st.session_state.pop('model_prop_legs',None)
+                    if board: st.success(f'Built {len(board)} player-stat projections.')
+                    else: st.warning('No player projections returned. Check Data Health and player/team game-log access.')
+                except Exception as e: st.error(f'Projection board failed: {type(e).__name__}: {e}')
+    raw_board=st.session_state.get('model_player_board',[])
+    if raw_board:
+        st.write('Enter a sportsbook line for each player/stat you want to evaluate. Leave unused rows blank.')
+        editable=pd.DataFrame([{k:v for k,v in r.items() if not k.startswith('_')} for r in raw_board])
+        edited=st.data_editor(editable,use_container_width=True,hide_index=True,
+            column_config={'line':st.column_config.NumberColumn('Your book line',help='Enter the actual line; leave blank to skip.',format='%.1f')},
+            disabled=[c for c in editable.columns if c!='line'],key='model_board_editor')
+        if st.button('Evaluate entered lines'):
+            merged=[]
+            for i,row in edited.iterrows():
+                item=dict(raw_board[i]); item['line']=row.get('line'); merged.append(item)
+            legs=evaluate_manual_lines(merged)
+            st.session_state['model_prop_legs']=legs
+            st.success(f'Evaluated {len(legs)} entered player lines.')
+    legs=st.session_state.get('model_prop_legs',[])
     if legs:
-        st.markdown("**Best individual edges (model estimate vs available market price)**")
-        st.dataframe(pd.DataFrame(legs[:30]),use_container_width=True,hide_index=True)
+        st.subheader('Model estimates against your entered lines')
+        st.dataframe(pd.DataFrame(legs).drop(columns=['game_id','player_id'],errors='ignore'),use_container_width=True,hide_index=True)
         candidates=build_candidates(legs,leg_count,20)
         if candidates:
-            st.markdown(f"**Top {leg_count}-leg combinations**")
+            st.subheader(f'Top {leg_count}-leg combinations')
             for i,candidate in enumerate(candidates[:5]):
-                with st.expander(f"Combination {i+1} · mean edge {candidate['mean_edge']:.1%}"):
-                    for leg in candidate["legs"]:
-                        st.write(f"{leg['player']} — {leg['direction'].upper()} {leg['line']} {leg['market']} · projection {leg['projection']:.1f} · estimated probability {leg['probability']:.1%} · edge {leg['edge']:.1%}")
-                    st.caption(candidate["warning"])
-                    if st.button("Save these legs",key=f"save_combo_{i}"):
-                        for leg in candidate["legs"]: save_prop_prediction(leg["game_id"],leg)
-                        st.success("Saved all legs for post-game grading.")
-        else: st.warning("Not enough different games with supported props and usable recent logs to make this size parlay.")
-    else: st.info("Tap Scan today's player props to build candidate legs from current provider lines.")
+                with st.expander(f'Combination {i+1} · average model separation {candidate["mean_edge"]:.1%}'):
+                    for leg in candidate['legs']:
+                        st.write(f'{leg["player"]} — {leg["direction"].upper()} {leg["line"]} {leg["market"]} · projection {leg["projection"]:.1f} · model estimate {leg["probability"]:.1%}')
+                    st.caption('Recent historical outcomes are not calibrated sportsbook edges. Different-game selection does not make legs independent.')
+                    if st.button('Save these legs',key=f'save_model_combo_{i}'):
+                        for leg in candidate['legs']: save_prop_prediction(leg['game_id'],leg)
+                        st.success('Saved legs for post-game grading.')
+        else: st.info('Not enough distinct games with entered lines and supported samples for this parlay size.')
+    else: st.info('Build the projection board, enter sportsbook lines, then evaluate them. No live props or odds API is needed.')
 with tabs[5]:
     st.subheader("Accuracy tracker")
     if st.button("Grade all completed games and props"):
