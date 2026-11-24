@@ -27,7 +27,7 @@ with st.sidebar:
     st.caption(f"Slate date: {today}")
     st.caption("Provider data timestamps are shown where supplied.")
 
-tabs=st.tabs(["Today's slate","Game lab","Player projections","Injuries & lineups","Parlay builder","Accuracy tracker","Data health"])
+tabs=st.tabs(["Today's slate","Game lab","Player projections","Injuries & lineups","Parlay builder","Accuracy tracker","Backtesting","Data health"])
 try:
     games=games_for_date(today)
     slate_error=None
@@ -179,7 +179,7 @@ with tabs[5]:
             st.dataframe(game_hist,use_container_width=True,hide_index=True)
             graded=game_hist[game_hist["graded"]==1]
             if len(graded):
-                correct=((graded.apply(lambda r: r["p_home"]>.5 if r["actual_winner"]==r["home"] else r["p_away"]>.5,axis=1))).mean()
+                correct=((graded.apply(lambda r: (r["home"] if r["p_home"]>=0.5 else r["away"])==r["actual_winner"],axis=1))).mean()
                 st.metric("Winner-direction accuracy",f"{correct:.1%}",f"{len(graded)} graded")
         if not prop_hist.empty:
             st.markdown("**Player prop predictions**")
@@ -187,11 +187,31 @@ with tabs[5]:
         if game_hist.empty and prop_hist.empty: st.info("Save predictions before games to start the record.")
     except Exception as e: st.error(f"History unavailable: {e}")
 with tabs[6]:
+    st.subheader("Historical player projection backtest")
+    st.caption("Walk-forward testing uses only earlier games to predict later games; it does not use future data.")
+    bt_player=st.text_input("Player to backtest",placeholder="e.g. Jayson Tatum",key="bt_player")
+    bt_stat=st.selectbox("Backtest stat",["PTS","REB","AST","STL","BLK","MIN","3PM"],key="bt_stat")
+    if st.button("Run walk-forward backtest"):
+        from backtest import player_walk_forward
+        with st.spinner("Testing historical projections…"):
+            try: bt,note=player_walk_forward(bt_player,bt_stat)
+            except Exception as e: bt,note=None,str(e)
+        if bt:
+            a,b,c=st.columns(3)
+            a.metric("Mean absolute error",f"{bt['mae']:.2f}")
+            b.metric("Root mean squared error",f"{bt['rmse']:.2f}")
+            c.metric("Average bias",f"{bt['bias']:+.2f}")
+            st.write(f"Tested {bt['games']} historical games for {bt['player']} ({bt_stat}).")
+            st.line_chart(bt["rows"].set_index("date")[["predicted","actual"]])
+            st.dataframe(bt["rows"],use_container_width=True,hide_index=True)
+        else: st.warning(note)
+
+with tabs[7]:
     st.subheader("Data health and source limitations")
     st.write(f"Provider key: {'Connected' if api_key() else 'Missing'}")
     st.write(f"Schedule: {'Loaded' if games else 'No records returned'} · {today}")
     st.write("Injuries and lineups: BALLDONTLIE GOAT endpoints; always inspect status and updated_at.")
     st.write("Player props: live market snapshot. Provider notes that props are not historically stored and may disappear as games near completion.")
-    st.write("Team model: recent game margins and home-court prior. Pace/efficiency, role changes, player on/off impact, rest-day adjustment, opponent positional defense and full backtesting remain planned model upgrades.")
+    st.write("Team model: recent game margins and home-court prior. Pace/efficiency, role changes, player on/off impact and opponent positional defense remain planned model upgrades. A walk-forward player-stat backtest is available in the Backtesting tab.")
     st.write("Cloud SQLite storage may reset on redeploy/restart. For durable season-long accuracy tracking, connect persistent Postgres.")
     st.caption("No model probability is a guarantee. Missing or stale data should reduce confidence, not be silently filled.")
