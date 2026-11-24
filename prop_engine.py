@@ -32,7 +32,7 @@ def analyze_props(game,props,max_players=35):
             probability=over if direction=="over" else 1-over
             edge=max(over_edge,under_edge)
             player=prop.get("player") or player_by_id(pid)
-            results.append({"game_id":game["id"],"player_id":pid,"player":f"{player.get('first_name','Player')} {player.get('last_name','')}","market":kind,"line":float(line),"direction":direction,"probability":float(probability),"projection":float(proj["projection"]),"edge":float(edge),"vendor":prop.get("vendor",""),"updated_at":prop.get("updated_at"),"sample":proj["n"],"source":"BALLDONTLIE player props + season game logs"})
+            results.append({"game_id":game["id"],"player_id":pid,"player":f"{player.get('first_name','Player')} {player.get('last_name','')}","market":kind,"line":float(line),"direction":direction,"probability":float(probability),"projection":float(projection),"edge":float(edge),"vendor":prop.get("vendor",""),"updated_at":prop.get("updated_at"),"sample":proj["n"],"source":"BALLDONTLIE player props + season game logs"})
         except Exception:
             continue
     return sorted(results,key=lambda x:x["edge"],reverse=True)
