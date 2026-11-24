@@ -167,6 +167,17 @@ with tabs[4]:
         st.subheader('AI-generated parlay candidates')
         st.caption('Suggested target lines are calculated from player game logs, projected minutes, role trend and available opponent defense/pace data. They are model targets, not confirmed sportsbook lines.')
         auto_legs=st.session_state['model_auto_legs']
+        st.markdown("**Top sample-supported player prop targets**")
+        shortlist=pd.DataFrame([{
+            "Player":x.get("player"),"Matchup":x.get("matchup"),"Market":x.get("market"),
+            "Direction":x.get("direction"),"Suggested line":x.get("line"),
+            "Projection":x.get("projection"),"Recent hit estimate":x.get("probability"),
+            "Confidence floor":x.get("confidence_score"),"Games sampled":x.get("confidence_sample"),
+            "Minutes":x.get("minutes")
+        } for x in auto_legs[:15]])
+        if not shortlist.empty:
+            st.dataframe(shortlist,use_container_width=True,hide_index=True)
+            st.caption("Ranked by a conservative Wilson lower bound from recent box-score outcomes. These are model-generated target lines, not live sportsbook lines or calibrated betting probabilities.")
         auto_candidates=build_candidates(auto_legs,leg_count,10)
         if auto_candidates:
             for i,candidate in enumerate(auto_candidates[:5]):
@@ -236,6 +247,17 @@ with tabs[5]:
                 st.metric("Player prop hit rate",f"{graded_props.hit.mean():.1%}",f"{len(graded_props)} graded legs")
                 prop_brier = ((graded_props["probability"] - graded_props["hit"]) ** 2).mean()
                 st.metric("Player prop probability Brier score", f"{prop_brier:.3f}", "Lower is better; 0 is perfect")
+                if "direction" in graded_props:
+                    direction_rows=graded_props.groupby("direction")["hit"].agg(["mean","count"]).reset_index()
+                    direction_rows=direction_rows.rename(columns={"direction":"Side","mean":"Hit rate","count":"Graded bets"})
+                    st.markdown("**Over vs. under performance**")
+                    st.dataframe(direction_rows,use_container_width=True,hide_index=True)
+                if "player" in graded_props:
+                    player_rows=graded_props.groupby("player")["hit"].agg(["mean","count"]).reset_index()
+                    player_rows=player_rows.rename(columns={"player":"Player","mean":"Hit rate","count":"Graded props"})
+                    player_rows=player_rows.sort_values(["Hit rate","Graded props"],ascending=[False,False])
+                    st.markdown("**Player consistency leaderboard (saved props only)**")
+                    st.dataframe(player_rows,use_container_width=True,hide_index=True)
         if game_hist.empty and prop_hist.empty: st.info("Save predictions before games to start the record.")
     except Exception as e: st.error(f"History unavailable: {e}")
 with tabs[6]:
