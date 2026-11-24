@@ -46,3 +46,13 @@ def team_games(team_id,season):
     rows.sort(key=lambda x:x.get("date",""),reverse=True); return rows
 def current_season_start(today=None):
     today=today or date.today(); return today.year if today.month>=10 else today.year-1
+
+@st.cache_data(ttl=300,show_spinner=False)
+def game_by_id(game_id):
+    return request(f"/v1/games/{int(game_id)}").get("data",{})
+@st.cache_data(ttl=21600,show_spinner=False)
+def player_by_id(player_id):
+    return request(f"/v1/players/{int(player_id)}").get("data",{})
+@st.cache_data(ttl=900,show_spinner=False)
+def game_player_stats(game_id,player_id):
+    return pages("/v1/stats",{"game_ids[]":int(game_id),"player_ids[]":int(player_id),"per_page":100},2)
