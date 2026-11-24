@@ -1,6 +1,6 @@
 import numpy as np
 from datetime import date
-from bdl import current_season_start, team_games, player_game_stats, search_players, team_advanced_averages, team_base_averages, injuries, player_season_averages, player_advanced_averages
+from bdl import current_season_start, team_games, player_game_stats, search_players, team_advanced_averages, team_base_averages, injuries, player_season_averages, player_advanced_averages, team_games_history
 from features import player_rows, rolling_projection, minutes_projection, as_float, STAT_MAP
 
 def project_player(name,stat):
@@ -73,8 +73,10 @@ def predict_game(away,home,simulations=10000):
         rest_adj=0.0
         if arest==0: rest_adj-=1.0
         if hrest==0: rest_adj+=1.0
-        away_by_id={g.get("id"):g for g in ag}
-        home_by_id={g.get("id"):g for g in hg}
+        away_history=team_games_history(away["id"],current_season_start())
+        home_history=team_games_history(home["id"],current_season_start())
+        away_by_id={g.get("id"):g for g in away_history}
+        home_by_id={g.get("id"):g for g in home_history}
         meetings=[away_by_id[k] for k in set(away_by_id).intersection(home_by_id) if away_by_id[k].get("status_state")=="final"]
         h2h=[]
         for game in sorted(meetings,key=lambda x:x.get("date",""),reverse=True)[:5]:
