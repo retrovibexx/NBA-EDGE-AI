@@ -1,6 +1,6 @@
 import numpy as np
 from datetime import date
-from bdl import current_season_start, team_games, player_game_stats, search_players, team_advanced_averages, team_base_averages, injuries, player_season_averages, player_advanced_averages, team_games_history
+from bdl import current_season_start, team_games, player_game_stats, search_players, team_advanced_averages, injuries, player_season_averages, player_advanced_averages, team_games_history
 from features import player_rows, rolling_projection, minutes_projection, as_float, STAT_MAP
 
 def project_player(name,stat):
@@ -41,36 +41,36 @@ def _team_rating(team,target_date):
         try: rest=max(0,(date.fromisoformat(target_date)-date.fromisoformat(last_date)).days-1)
         except Exception: pass
     advanced=team_advanced_averages(team["id"],current_season_start())
-    base=team_base_averages(team["id"],current_season_start())
     adv=(advanced[0].get("stats") or {}) if advanced else {}
-    bas=(base[0].get("stats") or {}) if base else {}
     net=adv.get("net_rating")
     pace=adv.get("pace",adv.get("e_pace"))
     offense=adv.get("off_rating")
     defense=adv.get("def_rating")
-    return (float(np.mean(margins)) if margins else 0.0),len(margins),games,rest,net,pace,offense,defense,bas
+    return (float(np.mean(margins)) if margins else 0.0),len(margins),games,rest,net,pace,offense,defense
 
-def _injury_penalty(team_id):
+def _injury_penalties(team_ids):
+    team_ids=set(team_ids)
     rows=injuries()
-    relevant=[x for x in rows if (x.get("player") or {}).get("team_id")==team_id]
-    relevant=[x for x in relevant if str(x.get("status","")).lower() in ("out","doubtful","questionable","probable")]
-    if not relevant: return 0.0,0
-    stats=player_season_averages([(x.get("player") or {}).get("id") for x in relevant],current_season_start())
+    relevant=[x for x in rows if (x.get("player") or {}).get("team_id") in team_ids and str(x.get("status","")).lower() in ("out","doubtful","questionable","probable")]
+    ids=[(x.get("player") or {}).get("id") for x in relevant]
+    stats=player_season_averages(ids,current_season_start()) if ids else []
     by_id={((x.get("player") or {}).get("id")):x.get("stats") or {} for x in stats}
     weights={"out":1.0,"doubtful":0.75,"questionable":0.4,"probable":0.1}
-    impact=0.0
+    impacts={team_id:{"penalty":0.0,"count":0} for team_id in team_ids}
     for item in relevant:
-        p=item.get("player") or {}; s=by_id.get(p.get("id"),{})
+        p=item.get("player") or {}; team_id=p.get("team_id"); s=by_id.get(p.get("id"),{})
         value=float(s.get("pts",0) or 0)+0.6*float(s.get("reb",0) or 0)+0.8*float(s.get("ast",0) or 0)
-        impact+=value*weights.get(str(item.get("status","")).lower(),0.0)*0.06
-    return min(4.5,impact),len(relevant)
+        impacts[team_id]["penalty"]+=value*weights.get(str(item.get("status","")).lower(),0.0)*0.06
+        impacts[team_id]["count"]+=1
+    for team_id in impacts: impacts[team_id]["penalty"]=min(4.5,impacts[team_id]["penalty"])
+    return impacts
 
 def predict_game(away,home,simulations=10000,target_date=None,exclude_game_id=None):
     if away.get("id")==home.get("id"): return {"error":"Choose two different teams."}
     try:
         target_date=target_date or date.today().isoformat()
-        ar,an,ag,arest,anet,apace,aoff,adef,abase=_team_rating(away,target_date)
-        hr,hn,hg,hrest,hnet,hpace,hoff,hdef,hbase=_team_rating(home,target_date)
+        ar,an,ag,arest,anet,apace,aoff,adef=_team_rating(away,target_date)
+        hr,hn,hg,hrest,hnet,hpace,hoff,hdef=_team_rating(home,target_date)
         rest_adj=0.0
         if arest==0: rest_adj-=1.0
         if hrest==0: rest_adj+=1.0
@@ -88,8 +88,9 @@ def predict_game(away,home,simulations=10000,target_date=None,exclude_game_id=No
         net_adj=0.0
         if anet is not None and hnet is not None:
             net_adj=(float(hnet)-float(anet))*0.035
-        away_injury,away_injured_count=_injury_penalty(away["id"])
-        home_injury,home_injured_count=_injury_penalty(home["id"])
+        injury_impacts=_injury_penalties([away["id"],home["id"]])
+        away_injury=injury_impacts[away["id"]]["penalty"]; away_injured_count=injury_impacts[away["id"]]["count"]
+        home_injury=injury_impacts[home["id"]]["penalty"]; home_injured_count=injury_impacts[home["id"]]["count"]
         margin=(hr-ar)+2.0+rest_adj+h2h_adj+net_adj+away_injury-home_injury
         rng=np.random.default_rng(42)
         sims=rng.normal(margin,12.0,int(simulations))
