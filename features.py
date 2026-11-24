@@ -8,12 +8,22 @@ def as_float(v):
         return float(v)
     except Exception: return float("nan")
 def player_rows(rows):
+    """Normalize flat BALLDONTLIE /v1/stats rows and nested stats payloads."""
     out=[]
+    metadata={"id","game","player","team","stats","season","postseason"}
     for row in rows:
-        game=row.get("game") or {}; stats=row.get("stats") or {}
-        merged=dict(stats); merged["date"]=game.get("date",""); merged["game_id"]=game.get("id")
-        merged["team"]=row.get("team") or {}; out.append(merged)
+        game=row.get("game") or {}
+        nested=row.get("stats")
+        merged=dict(nested) if isinstance(nested,dict) else {}
+        for key,value in row.items():
+            if key not in metadata and key not in merged:
+                merged[key]=value
+        merged["date"]=game.get("date",row.get("date",""))
+        merged["game_id"]=game.get("id",row.get("game_id"))
+        merged["team"]=row.get("team") or {}
+        out.append(merged)
     return sorted(out,key=lambda x:x.get("date",""),reverse=True)
+
 def rolling_projection(rows,stat):
     key=STAT_MAP.get(stat,stat.lower()); values=[as_float(r.get(key)) for r in rows]
     values=[v for v in values if math.isfinite(v)]
