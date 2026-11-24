@@ -58,20 +58,8 @@ def project_player(name, stat):
     proj = rolling_projection(rows, stat)
     if not proj:
         return {"error": f"No usable {stat} records returned."}
-    minutes = minutes_projection(rows)
+    minutes = proj.get("minutes_projection") or minutes_projection(rows)
     projection = proj["projection"]
-    if stat != "MIN" and minutes:
-        key = STAT_MAP.get(stat, stat.lower())
-        recent = rows[:min(10, len(rows))]
-        rates = []
-        for row in recent:
-            value = as_float(row.get(key))
-            played = as_float(row.get("min"))
-            if np.isfinite(value) and np.isfinite(played) and played > 0:
-                rates.append(value / played)
-        if rates:
-            rate = float(np.mean(rates))
-            projection = .4 * projection + .6 * rate * minutes
     # Advanced usage is supplementary; recent game logs still support a projection without it.
     try:
         advanced = player_advanced_averages(exact["id"], current_season_start())
@@ -85,7 +73,8 @@ def project_player(name, stat):
         "projection": projection, "average": proj["mean"], "median": proj["median"],
         "last5": proj["last5"], "last10": proj["last10"], "games": proj["n"],
         "minutes": minutes, "usage": usage, "values": proj["values"],
-        "note": "Projection blends recent box-score output with per-minute production scaled by expected minutes. Advanced usage data is shown when available; opponent, role and out-of-sample calibration remain limitations."
+        "std": proj.get("std"), "last5": proj["last5"], "last10": proj["last10"],
+        "note": "Projection uses one shared recent-form and per-minute model that is also used in walk-forward testing. Advanced usage is informational; opponent and lineup context remain limitations."
     }
 
 
