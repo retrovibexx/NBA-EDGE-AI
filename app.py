@@ -1,111 +1,197 @@
 import streamlit as st
 import pandas as pd
 from datetime import date
-from data import get_scoreboard, get_team_form, get_player_logs, refresh_cache, data_health
+from bdl import api_key, games_for_date, injuries, projected_lineups, player_props, game_odds, freshness_label
 from model import predict_game, project_player
-from parlays import build_parlay
-from tracker import init_db, save_prediction, load_predictions, grade_predictions
+from prop_engine import analyze_props
+from parlays import build_candidates
+from tracker import init_db, save_game_prediction, save_prop_prediction, load_predictions, grade_completed
 
-st.set_page_config(page_title="NBA Edge AI", page_icon="🏀", layout="wide")
+st.set_page_config(page_title="NBA Edge AI",page_icon="🏀",layout="wide")
 init_db()
 st.title("🏀 NBA Edge AI")
-st.caption("NBA game intelligence • player projections • simulation lab • $0 data stack")
+st.caption("NBA-only prediction lab · player projections · injuries · lineups · market edges · parlay research")
+if not api_key():
+    st.warning("Connect your BALLDONTLIE API key to activate premium NBA data. Do not paste the key into chat.")
+    st.markdown("[Create your BALLDONTLIE account](https://app.balldontlie.io/) · [API documentation](https://docs.balldontlie.io/)")
+    st.code('BALLDONTLIE_API_KEY = "YOUR_KEY"',language="toml")
+    st.stop()
+
+today=date.today().isoformat()
 with st.sidebar:
     st.subheader("Data controls")
-    st.caption("Public NBA data can be delayed, throttled, or unavailable from cloud hosts.")
-    if st.button("↻ Refresh NBA data", use_container_width=True):
-        with st.spinner("Refreshing public NBA data…"):
-            refresh_cache.clear()
-            st.session_state["refresh_result"] = refresh_cache()
-    if st.session_state.get("refresh_result"):
-        st.success(st.session_state["refresh_result"])
-    st.divider()
-    st.caption("Model estimates are not guarantees or betting advice.")
+    st.caption("NBA GOAT is recommended for injuries, lineups, props, odds and advanced endpoints.")
+    if st.button("↻ Clear cached data and refresh",use_container_width=True):
+        st.cache_data.clear()
+        st.rerun()
+    st.caption(f"Slate date: {today}")
+    st.caption("Provider data timestamps are shown where supplied.")
 
-tabs = st.tabs(["Today's slate", "Game lab", "Player projections", "Parlay builder", "Track record", "Data health"])
+tabs=st.tabs(["Today's slate","Game lab","Player projections","Injuries & lineups","Parlay builder","Accuracy tracker","Data health"])
+try:
+    games=games_for_date(today)
+    slate_error=None
+except Exception as e:
+    games=[]; slate_error=str(e)
+game_labels={}
+for g in games:
+    away=(g.get("visitor_team") or {}).get("full_name","Away")
+    home=(g.get("home_team") or {}).get("full_name","Home")
+    game_labels[f"{away} @ {home} · {g.get('status','')} · #{g.get('id')}"]=g
+
 with tabs[0]:
     st.subheader("Today's NBA slate")
-    games, note = get_scoreboard()
-    st.caption(note)
-    if games.empty:
-        st.warning("The live scoreboard could not be loaded. Try Refresh, or return later. No games have been fabricated.")
+    if slate_error: st.error(slate_error)
+    elif not games: st.info("No games returned for this date, or the provider has not posted the schedule.")
     else:
-        for _, g in games.iterrows():
-            away, home = str(g.get("awayTeam",{}).get("teamName","Away")), str(g.get("homeTeam",{}).get("teamName","Home"))
-            status = g.get("gameStatusText","")
-            st.markdown(f"**{away}** at **{home}**  ·  {status}")
-            c1,c2,c3 = st.columns([2,2,1])
-            c1.metric(away, g.get("awayTeam",{}).get("score","—"))
-            c2.metric(home, g.get("homeTeam",{}).get("score","—"))
-            c3.write(g.get("gameEt",""))
+        odds_by_game={}
+        try:
+            for o in game_odds(today): odds_by_game.setdefault(o.get("game_id"),[]).append(o)
+        except Exception as e: st.caption(f"Odds feed unavailable: {e}")
+        for g in games:
+            away=g.get("visitor_team") or {}; home=g.get("home_team") or {}
+            a,b,c=st.columns([3,3,2])
+            a.markdown(f"**{away.get('full_name','Away')}**")
+            b.markdown(f"**{home.get('full_name','Home')}**")
+            c.write(g.get("status",""))
+            a.metric("Away score",g.get("visitor_team_score","—"))
+            b.metric("Home score",g.get("home_team_score","—"))
+            c.caption(g.get("datetime") or g.get("date",""))
+            market=odds_by_game.get(g.get("id"),[])
+            if market:
+                m=market[0]
+                st.caption(f"Market snapshot ({m.get('vendor','book')}): ML {m.get('moneyline_away_odds','—')} / {m.get('moneyline_home_odds','—')} · Spread {m.get('spread_away_value','—')} / {m.get('spread_home_value','—')} · Total {m.get('total_value','—')} · {freshness_label(m.get('updated_at'))}")
             st.divider()
+
 with tabs[1]:
     st.subheader("Game winner simulator")
-    teams = ["ATL","BOS","BKN","CHA","CHI","CLE","DAL","DEN","DET","GSW","HOU","IND","LAC","LAL","MEM","MIA","MIL","MIN","NOP","NYK","OKC","ORL","PHI","PHX","POR","SAC","SAS","TOR","UTA","WAS"]
-    a,b = st.columns(2)
-    away = a.selectbox("Away team", teams, index=0)
-    home = b.selectbox("Home team", teams, index=1)
-    sims = st.slider("Monte Carlo simulations", 1000, 20000, 8000, 1000)
-    if st.button("Simulate matchup", type="primary"):
-        with st.spinner("Building matchup estimate…"):
-            result = predict_game(away, home, sims)
-        if result.get("error"):
-            st.error(result["error"])
-        else:
-            x,y,z = st.columns(3)
-            x.metric(f"{away} win estimate", f"{result['away_win']:.1%}")
-            y.metric(f"{home} win estimate", f"{result['home_win']:.1%}")
-            z.metric("Projected total", f"{result['total']:.1f}")
-            st.write(f"Projected score: **{away} {result['away_score']:.1f} – {home} {result['home_score']:.1f}**")
-            st.caption(result["explanation"])
-            if st.button("Save this prediction"):
-                save_prediction(away,home,result)
-                st.success("Prediction saved.")
-with tabs[2]:
-    st.subheader("Player stat projection")
-    player = st.text_input("Player name", placeholder="e.g. Jayson Tatum")
-    stat = st.selectbox("Stat category", ["PTS","REB","AST","STL","BLK","MIN"])
-    if st.button("Project player"):
-        if not player.strip():
-            st.warning("Enter a player name.")
-        else:
-            with st.spinner("Loading recent game logs…"):
-                result = project_player(player.strip(),stat)
-            if result.get("error"):
-                st.error(result["error"])
+    if games:
+        selected=st.selectbox("Choose matchup",list(game_labels.keys()),key="game_lab")
+        g=game_labels[selected]
+        away=g["visitor_team"]; home=g["home_team"]
+        sims=st.slider("Simulations",2000,50000,15000,1000)
+        if st.button("Run matchup simulation",type="primary"):
+            with st.spinner("Analyzing recent team results…"):
+                result=predict_game(away,home,sims)
+            if result.get("error"): st.error(result["error"])
             else:
-                st.metric(f"Projected {stat}", f"{result['projection']:.1f}")
-                st.write(f"Recent average: **{result['average']:.1f}** · Median: **{result['median']:.1f}** · Games sampled: **{result['games']}**")
-                st.caption(result["note"])
-                if not result.get("minutes_reliable",False):
-                    st.warning("Minutes/role uncertainty can materially change this projection.")
-with tabs[3]:
-    st.subheader("Parlay research board")
-    st.info("Build a research shortlist from manually entered model estimates. Correlated legs are flagged; combined probability is intentionally not presented as a precise hit rate.")
-    raw = st.text_area("One leg per line: description, probability (0–1), correlation group\nExample: Celtics win,0.63,BOS game", height=130)
-    count = st.slider("Legs to include",3,6,3)
-    if st.button("Build shortlist"):
-        legs=[]
-        for line in raw.splitlines():
-            parts=[p.strip() for p in line.split(",")]
-            if len(parts)>=2:
-                try: legs.append({"name":parts[0],"p":float(parts[1]),"group":parts[2] if len(parts)>2 else ""})
-                except ValueError: pass
-        chosen,warnings = build_parlay(legs,count)
-        if not chosen: st.warning("Enter at least three valid legs with probabilities from 0 to 1.")
+                x,y,z=st.columns(3)
+                x.metric(f"{away['abbreviation']} win estimate",f"{result['away_win']:.1%}")
+                y.metric(f"{home['abbreviation']} win estimate",f"{result['home_win']:.1%}")
+                z.metric("Projected total",f"{result['total']:.1f}")
+                st.write(f"Projected score: **{away['abbreviation']} {result['away_score']:.1f} – {home['abbreviation']} {result['home_score']:.1f}**")
+                st.write(f"Recent scoring margin: {away['abbreviation']} {result['away_form']:+.1f} ({result['away_games']} games) · {home['abbreviation']} {result['home_form']:+.1f} ({result['home_games']} games)")
+                st.warning(result["note"])
+                if st.button("Save game prediction",key="save_game"):
+                    save_game_prediction(g,result); st.success("Saved before tip-off.")
+    else: st.info("Today's game slate is unavailable.")
+with tabs[2]:
+    st.subheader("Player projection lab")
+    player=st.text_input("Search player",placeholder="e.g. Nikola Jokic")
+    stat=st.selectbox("Stat",["PTS","REB","AST","STL","BLK","MIN","3PM"])
+    if st.button("Project player stat"):
+        if not player.strip(): st.warning("Enter a player name.")
         else:
-            st.dataframe(pd.DataFrame(chosen),use_container_width=True,hide_index=True)
-            for w in warnings: st.warning(w)
-            st.caption("This ranks entered estimates; it does not verify lines, injuries, odds, or actual market value.")
+            with st.spinner("Loading player logs…"):
+                try: result=project_player(player.strip(),stat)
+                except Exception as e: result={"error":str(e)}
+            if result.get("error"): st.error(result["error"])
+            else:
+                st.metric(f"{result['player']} projected {stat}",f"{result['projection']:.1f}")
+                a,b,c,d=st.columns(4)
+                a.metric("Last 5 avg",f"{result['last5']:.1f}")
+                b.metric("Last 10 avg",f"{result['last10']:.1f}")
+                c.metric("Season sample avg",f"{result['average']:.1f}")
+                d.metric("Projected minutes",f"{result['minutes']:.1f}" if result["minutes"] else "Unavailable")
+                st.caption(f"Team: {result['team']} · Sample: {result['games']} games")
+                st.line_chart(pd.DataFrame({"Recent game values":result["values"]}))
+                st.warning(result["note"])
+with tabs[3]:
+    st.subheader("Injury report and lineup monitor")
+    try:
+        injury_rows=injuries()
+        if injury_rows:
+            injury_data=[]
+            for x in injury_rows:
+                p=x.get("player") or {}
+                injury_data.append({"Player":f"{p.get('first_name','')} {p.get('last_name','')}","Team ID":p.get("team_id"),"Status":x.get("status"),"Description":x.get("description"),"Return":x.get("return_date")})
+            st.dataframe(pd.DataFrame(injury_data),use_container_width=True,hide_index=True)
+        else: st.info("No injury records returned by provider.")
+    except Exception as e: st.error(f"Injury feed unavailable: {e}")
+    if games:
+        pick=st.selectbox("Lineup game",list(game_labels.keys()),key="lineup_game")
+        lg=game_labels[pick]
+        try:
+            lineups=projected_lineups(lg["id"])
+            if lineups:
+                for lu in lineups:
+                    st.markdown(f"**Team ID {lu.get('team_id')} · {str(lu.get('status','unknown')).upper()}** · {freshness_label(lu.get('updated_at'))}")
+                    players=[{"Position":p.get("position"),"Player":f"{(p.get('player') or {}).get('first_name','')} {(p.get('player') or {}).get('last_name','')}"} for p in lu.get("lineup",[])]
+                    st.dataframe(pd.DataFrame(players),use_container_width=True,hide_index=True)
+            else: st.info("No projected lineup available yet. Missing does not mean confirmed inactive.")
+        except Exception as e: st.error(f"Lineup feed unavailable: {e}")
 with tabs[4]:
-    st.subheader("Prediction history")
-    if st.button("Grade completed predictions"):
-        st.write(grade_predictions())
-    hist=load_predictions()
-    if hist.empty: st.info("Saved predictions will appear here.")
-    else: st.dataframe(hist,use_container_width=True,hide_index=True)
+    st.subheader("Automatic 3–6 leg parlay research")
+    st.caption("The builder compares recent player outcomes with current prop lines and removes repeated players and same-game combinations. It is not a guarantee of winning.")
+    leg_count=st.slider("Parlay size",3,6,3,key="parlay_size")
+    if st.button("Scan today's player props",type="primary"):
+        candidates_legs=[]
+        progress=st.progress(0)
+        if not games: st.warning("No games available to scan.")
+        else:
+            for i,g in enumerate(games):
+                try:
+                    props=player_props(g["id"])
+                    candidates_legs.extend(analyze_props(g,props,max_players=25))
+                except Exception as e:
+                    st.caption(f"Props unavailable for game {g.get('id')}: {e}")
+                progress.progress((i+1)/len(games))
+            st.session_state["prop_legs"]=candidates_legs
+            st.session_state["prop_candidates"]=build_candidates(candidates_legs,leg_count,20)
+            st.success(f"Scanned {len(candidates_legs)} modelled prop candidates.")
+    legs=st.session_state.get("prop_legs",[])
+    if legs:
+        st.markdown("**Best individual edges (model estimate vs available market price)**")
+        st.dataframe(pd.DataFrame(legs[:30]),use_container_width=True,hide_index=True)
+        candidates=build_candidates(legs,leg_count,20)
+        if candidates:
+            st.markdown(f"**Top {leg_count}-leg combinations**")
+            for i,candidate in enumerate(candidates[:5]):
+                with st.expander(f"Combination {i+1} · mean edge {candidate['mean_edge']:.1%}"):
+                    for leg in candidate["legs"]:
+                        st.write(f"{leg['player']} — {leg['direction'].upper()} {leg['line']} {leg['market']} · projection {leg['projection']:.1f} · estimated probability {leg['probability']:.1%} · edge {leg['edge']:.1%}")
+                    st.caption(candidate["warning"])
+                    if st.button("Save these legs",key=f"save_combo_{i}"):
+                        for leg in candidate["legs"]: save_prop_prediction(leg["game_id"],leg)
+                        st.success("Saved all legs for post-game grading.")
+        else: st.warning("Not enough different games with supported props and usable recent logs to make this size parlay.")
+    else: st.info("Tap Scan today's player props to build candidate legs from current provider lines.")
 with tabs[5]:
-    st.subheader("Data health")
-    health=data_health()
-    for item in health: st.write("• "+item)
-    st.caption("NBA Stats access may fail or be delayed, especially on hosted servers. The app will show errors rather than invent data.")
+    st.subheader("Accuracy tracker")
+    if st.button("Grade all completed games and props"):
+        with st.spinner("Checking completed box scores…"):
+            try: st.write(grade_completed())
+            except Exception as e: st.error(f"Grading failed: {e}")
+    try:
+        game_hist,prop_hist=load_predictions()
+        if not game_hist.empty:
+            st.markdown("**Game winner predictions**")
+            st.dataframe(game_hist,use_container_width=True,hide_index=True)
+            graded=game_hist[game_hist["graded"]==1]
+            if len(graded):
+                correct=((graded.apply(lambda r: r["p_home"]>.5 if r["actual_winner"]==r["home"] else r["p_away"]>.5,axis=1))).mean()
+                st.metric("Winner-direction accuracy",f"{correct:.1%}",f"{len(graded)} graded")
+        if not prop_hist.empty:
+            st.markdown("**Player prop predictions**")
+            st.dataframe(prop_hist,use_container_width=True,hide_index=True)
+        if game_hist.empty and prop_hist.empty: st.info("Save predictions before games to start the record.")
+    except Exception as e: st.error(f"History unavailable: {e}")
+with tabs[6]:
+    st.subheader("Data health and source limitations")
+    st.write(f"Provider key: {'Connected' if api_key() else 'Missing'}")
+    st.write(f"Schedule: {'Loaded' if games else 'No records returned'} · {today}")
+    st.write("Injuries and lineups: BALLDONTLIE GOAT endpoints; always inspect status and updated_at.")
+    st.write("Player props: live market snapshot. Provider notes that props are not historically stored and may disappear as games near completion.")
+    st.write("Team model: recent game margins and home-court prior. Pace/efficiency, role changes, player on/off impact, rest-day adjustment, opponent positional defense and full backtesting remain planned model upgrades.")
+    st.write("Cloud SQLite storage may reset on redeploy/restart. For durable season-long accuracy tracking, connect persistent Postgres.")
+    st.caption("No model probability is a guarantee. Missing or stale data should reduce confidence, not be silently filled.")
