@@ -56,3 +56,11 @@ def player_by_id(player_id):
 @st.cache_data(ttl=900,show_spinner=False)
 def game_player_stats(game_id,player_id):
     return pages("/v1/stats",{"game_ids[]":int(game_id),"player_ids[]":int(player_id),"per_page":100},2)
+
+def freshness_label(iso):
+    if not iso: return "Timestamp unavailable"
+    try:
+        dt=datetime.fromisoformat(str(iso).replace("Z","+00:00"))
+        mins=(datetime.now(timezone.utc)-dt).total_seconds()/60
+        return f"Updated {int(max(0,mins))} min ago"
+    except Exception: return str(iso)
