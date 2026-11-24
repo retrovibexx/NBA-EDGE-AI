@@ -15,7 +15,7 @@ def request(path,params=None,required=True):
     if not key:
         if required: raise RuntimeError("Add BALLDONTLIE_API_KEY in Streamlit Secrets to enable premium NBA data.")
         return {}
-    try: rpm=int(st.secrets.get("BALLDONTLIE_RPM",os.getenv("BALLDONTLIE_RPM","5")))
+    try: rpm=int(st.secrets.get("BALLDONTLIE_RPM",os.getenv("BALLDONTLIE_RPM","30")))
     except Exception: rpm=int(os.getenv("BALLDONTLIE_RPM","5"))
     rpm=max(1,min(rpm,600))
     with _rate_lock:
@@ -169,3 +169,11 @@ def player_game_stats_many(player_ids, season):
     rows = pages("/v1/stats", {"player_ids[]": ids, "seasons[]": int(season), "per_page": 100}, 30)
     rows.sort(key=lambda x: (x.get("game") or {}).get("date", ""), reverse=True)
     return rows
+
+
+@st.cache_data(ttl=21600,show_spinner=False)
+def players_for_teams(team_ids):
+    ids = sorted({int(x) for x in team_ids if x is not None})
+    if not ids:
+        return []
+    return pages("/v1/players", {"team_ids[]": ids, "per_page": 100}, 8)
