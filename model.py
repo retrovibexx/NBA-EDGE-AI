@@ -1,52 +1,31 @@
 import numpy as np
-from data import get_team_form, get_player_logs
-
-def _team_strength(abbr):
-    df=get_team_form(abbr)
-    if df.empty or "WL" not in df: return 0.0, "No recent team logs available; neutral baseline used."
-    wins=(df["WL"]=="W").sum()
-    losses=(df["WL"]=="L").sum()
-    margin=(df["PLUS_MINUS"].astype(float).mean() if "PLUS_MINUS" in df else 0.0)
-    # Shrink small samples toward neutral to reduce overconfidence.
-    score=(wins-losses)*0.45 + float(margin)*0.055
-    return float(np.clip(score,-2.5,2.5)), f"Recent form: {wins}–{losses} across {len(df)} games; strength estimate shrunk toward league average."
-
-def predict_game(away,home,n=8000):
-    if away==home: return {"error":"Choose two different teams."}
-    try:
-        sa,na=_team_strength(away); sh,nh=_team_strength(home)
-        # Home-court prior is deliberately modest; score variance is broad.
-        diff=(sh-sa)+1.6
-        rng=np.random.default_rng()
-        margin=rng.normal(diff,12.2,n)
-        away_win=float(np.mean(margin<0))
-        home_win=1-away_win
-        total=float(np.clip(rng.normal(226,15,n).mean(),175,275))
-        away_score=(total-diff)/2
-        home_score=(total+diff)/2
-        return {"away_win":away_win,"home_win":home_win,"total":total,"away_score":float(away_score),"home_score":float(home_score),"explanation":na+" "+nh+" Estimates are baseline simulations, not calibrated betting probabilities; injury, lineup and pace inputs are not yet complete."}
-    except Exception as e: return {"error":f"Could not simulate: {type(e).__name__}."}
-
+from datetime import date
+from bdl import current_season_start, team_games, player_game_stats, search_players
+from features import player_rows, rolling_projection, minutes_projection
 def project_player(name,stat):
-    df,note=get_player_logs(name)
-    if df.empty: return {"error":note}
-    col={"PTS":"PTS","REB":"REB","AST":"AST","STL":"STL","BLK":"BLK","MIN":"MIN"}.get(stat)
-    if col not in df: return {"error":f"{stat} is not present in the returned game logs."}
-    vals=df[col].astype(str).str.replace(":","",regex=False)
-    if stat=="MIN":
-        # NBA minute strings may be MM:SS.
-        def minutes(v):
-            try:
-                if ":" in str(v):
-                    a,b=str(v).split(":"); return float(a)+float(b)/60
-                return float(v)
-            except: return np.nan
-        series=df[col].apply(minutes).dropna()
-    else: series=pd.to_numeric(df[col],errors="coerce").dropna()
-    if series.empty: return {"error":"No usable stat values returned."}
-    recent=series.head(10)
-    avg=float(recent.mean()); median=float(recent.median())
-    # Recency-weighted mean with modest shrinkage to recent median.
-    weights=np.linspace(1.4,0.8,len(recent))
-    projection=float(np.average(recent.to_numpy(),weights=weights)*0.65+median*0.35)
-    return {"projection":projection,"average":avg,"median":median,"games":len(recent),"note":note+" Projection uses recent box-score production only; it does not yet adjust for confirmed opponent matchup, injury status, or starting role.","minutes_reliable":stat=="MIN"}
+    matches=search_players(name)
+    if not matches: return {"error":"Player not found in data provider."}
+    exact=next((p for p in matches if f"{p.get('first_name','')} {p.get('last_name','')}".strip().lower()==name.lower()),matches[0])
+    rows=player_rows(player_game_stats(exact["id"],current_season_start()))
+    if not rows: return {"error":"No player game logs returned for this season."}
+    proj=rolling_projection(rows,stat)
+    if not proj: return {"error":f"No usable {stat} records returned."}
+    return {"player":f"{exact.get('first_name','')} {exact.get('last_name','')}","team":(exact.get("team") or {}).get("abbreviation","—"),"projection":proj["projection"],"average":proj["mean"],"median":proj["median"],"last5":proj["last5"],"last10":proj["last10"],"games":proj["n"],"minutes":minutes_projection(rows),"values":proj["values"],"note":"Recency-weighted box-score projection; confirm current minutes, injuries, role and matchup before relying on it."}
+def _team_rating(team):
+    games=team_games(team["id"],current_season_start())
+    completed=[g for g in games if g.get("status_state")=="final" or str(g.get("status","")).lower()=="final"]
+    margins=[]
+    for g in completed[:12]:
+        hs=g.get("home_team_score"); vs=g.get("visitor_team_score")
+        if hs is None or vs is None: continue
+        margins.append(float(hs-vs) if (g.get("home_team") or {}).get("id")==team["id"] else float(vs-hs))
+    return (float(np.mean(margins)) if margins else 0.0),len(margins)
+def predict_game(away,home,simulations=10000):
+    if away.get("id")==home.get("id"): return {"error":"Choose two different teams."}
+    try:
+        ar,an=_team_rating(away); hr,hn=_team_rating(home)
+        margin=(hr-ar)+2.0
+        rng=np.random.default_rng(42); sims=rng.normal(margin,12.0,int(simulations))
+        hp=float(np.mean(sims>0)); total=float(np.clip(rng.normal(226,14,int(simulations)).mean(),180,275))
+        return {"away_win":1-hp,"home_win":hp,"home_margin":margin,"total":total,"away_score":(total-margin)/2,"home_score":(total+margin)/2,"away_form":ar,"home_form":hr,"away_games":an,"home_games":hn,"note":"Team recent scoring margin + home-court prior. This is a baseline until pace, efficiency, lineups and player availability are incorporated and backtested."}
+    except Exception as e: return {"error":f"Model error: {type(e).__name__}: {e}"}
