@@ -1,17 +1,27 @@
 """BALLDONTLIE NBA data adapter. Store API keys only in Streamlit secrets or environment variables."""
-import os, time
+import os, time, threading
 from datetime import date, datetime, timezone
 import requests
 import streamlit as st
 BASE="https://api.balldontlie.io"
+_last_request=0.0
+_rate_lock=threading.Lock()
 def api_key():
     try: return st.secrets.get("BALLDONTLIE_API_KEY","") or os.getenv("BALLDONTLIE_API_KEY","")
     except Exception: return os.getenv("BALLDONTLIE_API_KEY","")
 def request(path,params=None,required=True):
+    global _last_request
     key=api_key()
     if not key:
         if required: raise RuntimeError("Add BALLDONTLIE_API_KEY in Streamlit Secrets to enable premium NBA data.")
         return {}
+    try: rpm=int(st.secrets.get("BALLDONTLIE_RPM",os.getenv("BALLDONTLIE_RPM","5")))
+    except Exception: rpm=int(os.getenv("BALLDONTLIE_RPM","5"))
+    rpm=max(1,min(rpm,600))
+    with _rate_lock:
+        wait=max(0.0,(60.0/rpm)-(time.monotonic()-_last_request))
+        if wait: time.sleep(wait)
+        _last_request=time.monotonic()
     r=requests.get(BASE+path,headers={"Authorization":key},params=params or {},timeout=25)
     if r.status_code==401: raise RuntimeError("API key rejected or endpoint not in plan. Confirm NBA GOAT access.")
     if r.status_code==429: raise RuntimeError("Rate limit reached. Wait briefly and retry.")
