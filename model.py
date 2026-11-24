@@ -49,32 +49,36 @@ def project_player(name, stat):
     matches = search_players(name)
     if not matches:
         return {"error": "Player not found in data provider."}
-    exact = next((p for p in matches if f"{p.get('first_name', '')} {p.get('last_name', '')}".strip().lower() == name.lower()), matches[0])
+    exact = next(
+        (p for p in matches if f"{p.get('first_name', '')} {p.get('last_name', '')}".strip().lower() == name.lower()),
+        matches[0],
+    )
     rows = player_rows(player_game_stats(exact["id"], current_season_start()))
     if len(rows) < 5:
         rows = player_rows(player_game_history(exact["id"], current_season_start()))
     if not rows:
-        return {"error": "No player game logs returned for this season."}
+        return {"error": "No player game logs returned for this season or recent history."}
     proj = rolling_projection(rows, stat)
     if not proj:
         return {"error": f"No usable {stat} records returned."}
-    minutes = proj.get("minutes_projection") or minutes_projection(rows)
-    projection = proj["projection"]
-    # Advanced usage is supplementary; recent game logs still support a projection without it.
+
+    # Advanced usage is supplementary; the core forecast remains available without it.
     try:
         advanced = player_advanced_averages(exact["id"], current_season_start())
         adv = (advanced[0].get("stats") or {}) if advanced else {}
         usage = adv.get("usage_percentage")
     except Exception:
         usage = None
+
     return {
         "player": f"{exact.get('first_name', '')} {exact.get('last_name', '')}",
         "team": (exact.get("team") or {}).get("abbreviation", "—"),
-        "projection": projection, "average": proj["mean"], "median": proj["median"],
+        "projection": proj["projection"], "average": proj["mean"], "median": proj["median"],
         "last5": proj["last5"], "last10": proj["last10"], "games": proj["n"],
-        "minutes": minutes, "usage": usage, "values": proj["values"],
-        "std": proj.get("std"), "last5": proj["last5"], "last10": proj["last10"],
-        "note": "Projection uses one shared recent-form and per-minute model that is also used in walk-forward testing. Advanced usage is informational; opponent and lineup context remain limitations."
+        "minutes": proj.get("projected_minutes"), "usage": usage, "values": proj["values"],
+        "sample_std": proj.get("sample_std"), "weighted_mean": proj.get("weighted_mean"),
+        "per_minute_projection": proj.get("per_minute_projection"),
+        "note": "Projection uses one shared recency-weighted model: recent box-score production, a robust median component, and per-minute production scaled by projected minutes. Opponent, lineup and role context are not yet included in this core player-stat forecast."
     }
 
 
