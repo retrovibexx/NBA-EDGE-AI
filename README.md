@@ -27,7 +27,10 @@ In Streamlit Community Cloud → App → Settings → Secrets, add:
 
 Never commit a real API key to GitHub or paste it into chat. If you want the hourly GitHub Actions provider check, also add a repository Actions secret named BALLDONTLIE_API_KEY under Settings → Secrets and variables → Actions.
 
-## Automated checks\nGitHub Actions runs the unit tests on pushes and pull requests. A separate hourly provider check runs when the repository Actions secret is configured. The Streamlit app refreshes data through provider-specific caches (roughly 90 seconds to 6 hours depending on the feed) and has a manual cache refresh.\n\n## Run
+## Automated checks
+GitHub Actions runs the unit tests on pushes and pull requests. A separate hourly provider check runs when the repository Actions secret is configured. The Streamlit app refreshes data through provider-specific caches (roughly 90 seconds to 6 hours depending on the feed) and has a manual cache refresh.
+
+## Run
     pip install -r requirements.txt
     streamlit run app.py
 
