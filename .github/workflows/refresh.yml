@@ -1,16 +1,18 @@
-name: Refresh NBA Edge data
+name: NBA Edge AI provider health check
 on:
   schedule:
-    - cron: "15 */4 * * *"
+    - cron: "17 * * * *"
   workflow_dispatch:
 jobs:
-  refresh:
+  check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: pip install -r requirements.txt
-      - name: Check NBA scoreboard feed
-        run: python -c "from nba_api.live.nba.endpoints import scoreboard; print(len(scoreboard.ScoreBoard(timeout=20).get_dict().get('scoreboard',{}).get('games',[])))"
+      - run: pip install requests
+      - name: Check BALLDONTLIE feeds
+        env:
+          BALLDONTLIE_API_KEY: ${{ secrets.BALLDONTLIE_API_KEY }}
+        run: python health_check.py
