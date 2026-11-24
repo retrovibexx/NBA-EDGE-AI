@@ -46,7 +46,7 @@ def analyze_props(game,props,max_players=35):
             matchup=None
             if opponent_id is not None and kind not in COMBO_KEYS:
                 try:
-                    matchup=analyze_matchup(pid,opponent_id,stat,current_season_start())
+                    matchup=analyze_matchup(pid,opponent_id,stat,current_season_start(),include_full=False)
                     if matchup and not matchup.get("error"):
                         delta=float(matchup["adjusted_projection"])-float(matchup["base_projection"])
                         projection=max(0.0,projection+delta)
@@ -71,7 +71,7 @@ def analyze_props(game,props,max_players=35):
             probability=over_est if direction=="over" else 1-over_est
             edge=max(over_edge,under_edge)
             role_label=(matchup or {}).get("role",{}).get("label","Unavailable")
-            results.append({"game_id":game["id"],"player_id":pid,"player":f"{player.get('first_name','Player')} {player.get('last_name','')}","market":kind,"line":float(line),"direction":direction,"probability":float(probability),"projection":projection,"edge":float(edge),"vendor":prop.get("vendor",""),"updated_at":prop.get("updated_at"),"sample":len(values),"role_signal":role_label,"matchup_adjustment":round(float(matchup["adjusted_projection"])-float(matchup["base_projection"]),2) if matchup and not matchup.get("error") else None,"h2h_games":(matchup or {}).get("h2h_games",0),"source":"BALLDONTLIE player props + matchup-adjusted recent game logs"})
+            results.append({"game_id":game["id"],"player_id":pid,"player":f"{player.get('first_name','Player')} {player.get('last_name','')}","market":kind,"line":float(line),"direction":direction,"probability":float(probability),"projection":projection,"edge":float(edge),"vendor":prop.get("vendor",""),"updated_at":prop.get("updated_at"),"sample":len(values),"role_signal":role_label,"matchup_adjustment":round(float(matchup["adjusted_projection"])-float(matchup["base_projection"]),2) if matchup and not matchup.get("error") else None,"h2h_games":(matchup or {}).get("h2h_games",0),"position":(matchup or {}).get("position"),"positional_adjustment":(matchup or {}).get("positional_adjustment"),"source":"BALLDONTLIE player props + matchup-adjusted recent game logs"})
         except Exception:
             continue
     return sorted(results,key=lambda x:x["edge"],reverse=True)
