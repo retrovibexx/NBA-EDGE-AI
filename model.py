@@ -27,9 +27,9 @@ def project_player(name,stat):
     adv=(advanced[0].get("stats") or {}) if advanced else {}
     return {"player":f"{exact.get('first_name','')} {exact.get('last_name','')}","team":(exact.get("team") or {}).get("abbreviation","—"),"projection":projection,"average":proj["mean"],"median":proj["median"],"last5":proj["last5"],"last10":proj["last10"],"games":proj["n"],"minutes":minutes,"usage":adv.get("usage_percentage"),"values":proj["values"],"note":"Projection blends recent box-score output with per-minute production scaled by expected minutes. It still needs opponent, role and out-of-sample calibration."}
 
-def _team_rating(team):
+def _team_rating(team,target_date):
     games=team_games(team["id"],current_season_start())
-    completed=[g for g in games if g.get("status_state")=="final" or str(g.get("status","")).lower()=="final"]
+    completed=[g for g in games if (g.get("status_state")=="final" or str(g.get("status","")).lower()=="final") and g.get("date","")<target_date]
     margins=[]
     for g in completed[:12]:
         hs=g.get("home_team_score"); vs=g.get("visitor_team_score")
@@ -38,7 +38,7 @@ def _team_rating(team):
     last_date=completed[0].get("date") if completed else None
     rest=None
     if last_date:
-        try: rest=max(0,(date.today()-date.fromisoformat(last_date)).days-1)
+        try: rest=max(0,(date.fromisoformat(target_date)-date.fromisoformat(last_date)).days-1)
         except Exception: pass
     advanced=team_advanced_averages(team["id"],current_season_start())
     base=team_base_averages(team["id"],current_season_start())
@@ -65,7 +65,7 @@ def _injury_penalty(team_id):
         impact+=value*weights.get(str(item.get("status","")).lower(),0.0)*0.06
     return min(4.5,impact),len(relevant)
 
-def predict_game(away,home,simulations=10000):
+def predict_game(away,home,simulations=10000,target_date=None,exclude_game_id=None):
     if away.get("id")==home.get("id"): return {"error":"Choose two different teams."}
     try:
         ar,an,ag,arest,anet,apace,aoff,adef,abase=_team_rating(away)
@@ -77,7 +77,7 @@ def predict_game(away,home,simulations=10000):
         home_history=team_games_history(home["id"],current_season_start())
         away_by_id={g.get("id"):g for g in away_history}
         home_by_id={g.get("id"):g for g in home_history}
-        meetings=[away_by_id[k] for k in set(away_by_id).intersection(home_by_id) if away_by_id[k].get("status_state")=="final"]
+        meetings=[away_by_id[k] for k in set(away_by_id).intersection(home_by_id) if away_by_id[k].get("status_state")=="final" and away_by_id[k].get("date","")<(target_date or date.today().isoformat()) and away_by_id[k].get("id")!=exclude_game_id]
         h2h=[]
         for game in sorted(meetings,key=lambda x:x.get("date",""),reverse=True)[:5]:
             hs=game.get("home_team_score"); vs=game.get("visitor_team_score")
