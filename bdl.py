@@ -115,3 +115,25 @@ def player_game_history(player_id,season_start):
     rows=pages("/v1/stats",{"player_ids[]":int(player_id),"seasons[]":seasons,"per_page":100},36)
     rows.sort(key=lambda x:(x.get("game") or {}).get("date",""),reverse=True)
     return rows
+
+@st.cache_data(ttl=21600,show_spinner=False)
+def team_lineup_stats(team_id,game_ids):
+    ids=[int(x) for x in game_ids if x is not None]
+    if not ids: return []
+    return pages("/nba/v1/lineup_stats",{"team_ids[]":int(team_id),"game_ids[]":ids,"per_page":100},8)
+
+@st.cache_data(ttl=21600,show_spinner=False)
+def team_box_scores(game_ids):
+    ids=[int(x) for x in game_ids if x is not None]
+    if not ids: return []
+    return pages("/v1/stats",{"game_ids[]":ids,"per_page":100},12)
+
+@st.cache_data(ttl=21600,show_spinner=False)
+def player_matchup_defense(player_id,game_ids):
+    ids=[int(x) for x in game_ids if x is not None]
+    if not ids: return []
+    return pages("/nba/v1/matchups",{"player_ids[]":int(player_id),"game_ids[]":ids,"per_page":100},8)
+
+@st.cache_data(ttl=21600,show_spinner=False)
+def player_advanced_game_stats(player_id,season):
+    return pages("/nba/v2/stats/advanced",{"player_ids[]":int(player_id),"seasons[]":int(season),"period":0,"per_page":100},12)
