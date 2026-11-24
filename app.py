@@ -84,7 +84,7 @@ with tabs[1]:
                 z.metric("Projected total",f"{result['total']:.1f}")
                 st.write(f"Projected score: **{away['abbreviation']} {result['away_score']:.1f} – {home['abbreviation']} {result['home_score']:.1f}**")
                 st.write(f"Recent scoring margin: {away['abbreviation']} {result['away_form']:+.1f} ({result['away_games']} games) · {home['abbreviation']} {result['home_form']:+.1f} ({result['home_games']} games)")
-                st.write(f"Injury adjustment: {away['abbreviation']} −{result['away_injury_penalty']:.1f} pts · {home['abbreviation']} −{result['home_injury_penalty']:.1f} pts")
+                st.write(f"Estimated injury adjustment (heuristic): {away['abbreviation']} −{result['away_injury_penalty']:.1f} pts · {home['abbreviation']} −{result['home_injury_penalty']:.1f} pts")
                 st.write(f"Rest days: {away['abbreviation']} {result['away_rest_days']} · {home['abbreviation']} {result['home_rest_days']} · Head-to-head games sampled: {result['h2h_games']}")
                 st.warning(result["note"])
                 if st.button("Save game prediction",key="save_game"):
