@@ -1,5 +1,5 @@
-streamlit>=1.39
-nba_api>=1.11.0
+streamlit>=1.40
 pandas>=2.2
 numpy>=1.26
 requests>=2.32
+pytest>=8.0
