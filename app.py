@@ -195,15 +195,23 @@ with tabs[5]:
         if not game_hist.empty:
             st.markdown("**Game winner predictions**")
             st.dataframe(game_hist,use_container_width=True,hide_index=True)
+            st.download_button("Download game prediction history CSV", game_hist.to_csv(index=False).encode("utf-8"), "nba_game_predictions.csv", "text/csv")
             graded=game_hist[game_hist["graded"]==1]
             if len(graded):
                 correct=((graded.apply(lambda r: (r["home"] if r["p_home"]>=0.5 else r["away"])==r["actual_winner"],axis=1))).mean()
                 st.metric("Winner-direction accuracy",f"{correct:.1%}",f"{len(graded)} graded")
+            graded["actual_home_win"] = (graded["actual_winner"] == graded["home"]).astype(float)
+            game_brier = ((graded["p_home"] - graded["actual_home_win"]) ** 2).mean()
+            st.metric("Game probability Brier score", f"{game_brier:.3f}", "Lower is better; 0 is perfect")
         if not prop_hist.empty:
             st.markdown("**Player prop predictions**")
             st.dataframe(prop_hist,use_container_width=True,hide_index=True)
+            st.download_button("Download player prop history CSV", prop_hist.to_csv(index=False).encode("utf-8"), "nba_prop_predictions.csv", "text/csv")
             graded_props=prop_hist[prop_hist["graded"]==1]
-            if len(graded_props): st.metric("Player prop hit rate",f"{graded_props.hit.mean():.1%}",f"{len(graded_props)} graded legs")
+            if len(graded_props):
+                st.metric("Player prop hit rate",f"{graded_props.hit.mean():.1%}",f"{len(graded_props)} graded legs")
+                prop_brier = ((graded_props["probability"] - graded_props["hit"]) ** 2).mean()
+                st.metric("Player prop probability Brier score", f"{prop_brier:.3f}", "Lower is better; 0 is perfect")
         if game_hist.empty and prop_hist.empty: st.info("Save predictions before games to start the record.")
     except Exception as e: st.error(f"History unavailable: {e}")
 with tabs[6]:
