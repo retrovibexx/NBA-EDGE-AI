@@ -3,12 +3,14 @@
 These are transparent, sample-size-shrunk adjustments, not trained causal estimates.
 """
 import numpy as np
+import streamlit as st
 from bdl import player_game_history, team_advanced_averages, current_season_start, injuries, player_season_averages
 from features import player_rows, STAT_MAP, as_float, rolling_projection, minutes_projection
 
 def _stat_key(stat):
     return STAT_MAP.get(stat, str(stat).lower())
 
+@st.cache_data(ttl=1800, show_spinner=False)
 def analyze_matchup(player_id, opponent_id, stat="PTS", season=None):
     season = int(season or current_season_start())
     raw = player_game_history(int(player_id), season)
