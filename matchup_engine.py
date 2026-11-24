@@ -182,8 +182,12 @@ def analyze_matchup(player_id,opponent_id,stat="PTS",season=None,include_full=Tr
             value=_finite(row.get(key))
             if value is not None: h2h.append(value)
     h2h=h2h[:8]
-    adv=team_advanced_averages(int(opponent_id),season)
-    team_stats=_stats(adv[0]) if adv else {}
+    try:
+        adv=team_advanced_averages(int(opponent_id),season)
+        team_stats=_stats(adv[0]) if adv else {}
+    except Exception:
+        team_stats={}
+
     defense=_finite(team_stats.get("def_rating",team_stats.get("defensive_rating")))
     pace=_finite(team_stats.get("pace",team_stats.get("e_pace")))
     role=detect_role_change(rows)
@@ -212,18 +216,38 @@ def analyze_matchup(player_id,opponent_id,stat="PTS",season=None,include_full=Tr
                 adjustment+=pos_adjustment
         except Exception:
             pos_baseline=None
-    lineup=_lineup_impact(int(team_id),int(player_id),season) if team_id and include_full else {}
-    advanced=_player_advanced_context(int(player_id),season) if include_full else {}
+    lineup={}
+    advanced={}
+    vacancy={"weighted_vacated":{},"players":[],"count":0}
+    if include_full:
+        try:
+            if team_id:
+                vacancy=_team_injury_vacancy(int(team_id),season)
+        except Exception:
+            pass
+        try:
+            if team_id:
+                lineup=_lineup_impact(int(team_id),int(player_id),season)
+        except Exception:
+            pass
+        try:
+            advanced=_player_advanced_context(int(player_id),season)
+        except Exception:
+            pass
     return {
         "base_projection":float(base["projection"]),"adjusted_projection":float(max(0,base["projection"]+adjustment)),
         "opponent_def_rating":defense,"opponent_pace":pace,"h2h_mean":h2h_mean,"h2h_games":len(h2h),
         "role":role,"role_adjustment":float(adjustment),"sample":base["n"],"position":position,
-        "positional_defense":pos_context,"positional_baseline_per36":pos_baseline,"positional_adjustment":float(pos_adjustment),"lineup_impact":lineup,"advanced":advanced,"team_injury_vacancy":vacancy,"other_injured_teammates":vacancy_players,
+        "positional_defense":pos_context,"positional_baseline_per36":pos_baseline,"positional_adjustment":float(pos_adjustment),"lineup_impact":lineup,"advanced":advanced,"team_injury_vacancy":vacancy,"other_injured_teammates":vacancy.get("players",[]),
         "note":"Projection combines opponent team rating, recent position-specific box-score allowance relative to league positional production, H2H and role trends. Teammate injury vacancy, lineup on/off and advanced player rates are shown as context. Position splits and on/off are sample-dependent descriptive signals, not causal guarantees."
     }
 
 def team_injury_context(team_id):
-    rows=injuries(); relevant=[]
+    try:
+        rows=injuries()
+    except Exception:
+        return []
+    relevant=[]
     for item in rows:
         p=item.get("player") or {}
         if p.get("team_id")==int(team_id):
