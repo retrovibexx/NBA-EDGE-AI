@@ -101,3 +101,10 @@ def team_games_history(team_id,season_start):
     rows=pages("/v1/games",{"team_ids[]":int(team_id),"seasons[]":seasons,"per_page":100},12)
     rows.sort(key=lambda x:x.get("date",""),reverse=True)
     return rows
+
+@st.cache_data(ttl=21600,show_spinner=False)
+def player_game_history(player_id,season_start):
+    seasons=[int(season_start)-2,int(season_start)-1,int(season_start)]
+    rows=pages("/v1/stats",{"player_ids[]":int(player_id),"seasons[]":seasons,"per_page":100},36)
+    rows.sort(key=lambda x:(x.get("game") or {}).get("date",""),reverse=True)
+    return rows
