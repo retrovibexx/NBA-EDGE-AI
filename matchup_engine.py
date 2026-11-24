@@ -7,7 +7,7 @@ import numpy as np
 import streamlit as st
 from bdl import (
     player_game_history, team_advanced_averages, current_season_start, injuries,
-    team_games_history, team_lineup_stats, team_box_scores, player_advanced_game_stats,
+    team_games_history, team_lineup_stats, team_box_scores, player_advanced_game_stats, all_player_season_averages,
 )
 from features import player_rows, STAT_MAP, as_float, rolling_projection, minutes_projection
 
@@ -102,6 +102,25 @@ def _positional_defense(team_id,position,season):
             "minutes":minutes,"allowed_per36":per36,
             "note":"Recent box-score production allowed to opposing players listed at this position; descriptive only, not a league-relative defensive rank."}
 
+@st.cache_data(ttl=21600,show_spinner=False)
+def _league_position_baseline(season):
+    rows=all_player_season_averages(int(season))
+    totals={}
+    for row in rows:
+        player=row.get("player") or {}
+        pos=_position(player.get("position"))
+        stats=_stats(row)
+        if not pos: continue
+        bucket=totals.setdefault(pos,{k:0.0 for k in ("pts","reb","ast","stl","blk","fg3m","min")})
+        for key in bucket:
+            value=_finite(stats.get(key))
+            if value is not None: bucket[key]+=value
+    out={}
+    for pos,bucket in totals.items():
+        mins=bucket["min"]
+        out[pos]={k:(v/mins*36 if mins>0 else None) for k,v in bucket.items() if k!="min"}
+    return out
+
 @st.cache_data(ttl=1800,show_spinner=False)
 def _player_advanced_context(player_id,season):
     rows=player_advanced_game_stats(int(player_id),int(season))
@@ -155,18 +174,26 @@ def analyze_matchup(player_id,opponent_id,stat="PTS",season=None):
         adjustment+=delta_min if stat=="MIN" else delta_min*(base["projection"]/max(1.0,minutes or 1.0))
     pos_context=_positional_defense(int(opponent_id),position,season) if position else None
     pos_adjustment=0.0
-    if pos_context and minutes and pos_context["allowed_per36"].get(key) is not None and stat!="MIN":
-        # Conservative positional allowance signal is exposed, but not converted into a false league rank.
-        # It is used as a small player-specific rate context only when a neutral reference is available.
-        pass
+    pos_baseline=None
+    if pos_context and stat!="MIN":
+        try:
+            pos_baseline=_league_position_baseline(season).get(position,{}).get(key)
+            allowed=pos_context["allowed_per36"].get(key)
+            if allowed is not None and pos_baseline is not None and pos_baseline>0:
+                relative=(allowed/pos_baseline)-1.0
+                reliability=min(1.0,pos_context["player_game_rows"]/35.0)
+                pos_adjustment=base["projection"]*float(np.clip(relative*0.12*reliability,-0.035,0.035))
+                adjustment+=pos_adjustment
+        except Exception:
+            pos_baseline=None
     lineup=_lineup_impact(int(team_id),int(player_id),season) if team_id else {}
     advanced=_player_advanced_context(int(player_id),season)
     return {
         "base_projection":float(base["projection"]),"adjusted_projection":float(max(0,base["projection"]+adjustment)),
         "opponent_def_rating":defense,"opponent_pace":pace,"h2h_mean":h2h_mean,"h2h_games":len(h2h),
         "role":role,"role_adjustment":float(adjustment),"sample":base["n"],"position":position,
-        "positional_defense":pos_context,"lineup_impact":lineup,"advanced":advanced,
-        "note":"Opponent team rating, recent position-specific box-score allowance, actual lineup on/off splits, advanced player rates and H2H context are shown separately. On/off and position splits are descriptive, sample-dependent signals; they are not causal guarantees."
+        "positional_defense":pos_context,"positional_baseline_per36":pos_baseline,"positional_adjustment":float(pos_adjustment),"lineup_impact":lineup,"advanced":advanced,
+        "note":"Projection combines opponent team rating, recent position-specific box-score allowance relative to league positional production, H2H and role trends. Lineup on/off and advanced player rates are also shown. Position splits and on/off are sample-dependent descriptive signals, not causal guarantees."
     }
 
 def team_injury_context(team_id):
