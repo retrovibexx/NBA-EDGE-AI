@@ -1,6 +1,6 @@
 from itertools import combinations
 def build_candidates(legs,leg_count=3,limit=10):
-    valid=[x for x in legs if 0.01<float(x.get("probability",0))<.99 and abs(float(x.get("edge",0)))>0]
+    valid=[x for x in legs if 0.01<float(x.get("probability",0))<.99 and float(x.get("edge",0))>=0.025]
     valid=sorted(valid,key=lambda x:(x.get("edge",0),x.get("probability",0)),reverse=True)
     candidates=[]
     for combo in combinations(valid,leg_count):
