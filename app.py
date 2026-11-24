@@ -100,11 +100,12 @@ with tabs[2]:
             if result.get("error"): st.error(result["error"])
             else:
                 st.metric(f"{result['player']} projected {stat}",f"{result['projection']:.1f}")
-                a,b,c,d=st.columns(4)
+                a,b,c,d,e=st.columns(5)
                 a.metric("Last 5 avg",f"{result['last5']:.1f}")
                 b.metric("Last 10 avg",f"{result['last10']:.1f}")
                 c.metric("Season sample avg",f"{result['average']:.1f}")
                 d.metric("Projected minutes",f"{result['minutes']:.1f}" if result["minutes"] else "Unavailable")
+                e.metric("Season usage",f"{result['usage']:.1f}%" if result["usage"] is not None else "Unavailable")
                 st.caption(f"Team: {result['team']} · Sample: {result['games']} games")
                 st.line_chart(pd.DataFrame({"Recent game values":result["values"]}))
                 st.warning(result["note"])
