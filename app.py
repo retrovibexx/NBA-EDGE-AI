@@ -6,6 +6,7 @@ from model import predict_game
 from prop_engine import build_player_projection_board, build_model_legs
 from parlays import build_candidates
 from injury_guard import injury_status_map, is_unavailable
+from parlay_simulator import simulate_parlay
 
 st.set_page_config(page_title="NBA Edge AI", page_icon="🏀", layout="wide")
 st.title("🏀 NBA Edge AI")
@@ -106,6 +107,26 @@ with tabs[1]:
                 for leg in candidate["legs"]:
                     st.write(f"**{leg['player']}** — {leg['direction'].upper()} {leg['line']} {leg['market']} · projection {leg['projection']:.1f} · sample estimate {leg['probability']:.1%} · {leg['matchup']}")
                 st.caption(candidate["warning"])
+                sim_runs = st.select_slider("Monte Carlo runs", options=[5000, 10000, 20000, 50000], value=20000, key=f"sim_runs_{index}")
+                if st.button("Simulate this parlay", key=f"simulate_parlay_{index}"):
+                    try:
+                        with st.spinner("Bootstrapping historical player-game outcomes…"):
+                            result = simulate_parlay(candidate["legs"], simulations=sim_runs)
+                        st.session_state[f"parlay_sim_{index}"] = result
+                    except Exception as exc:
+                        st.error(f"Parlay simulation unavailable: {type(exc).__name__}: {exc}")
+                sim_result = st.session_state.get(f"parlay_sim_{index}")
+                if sim_result:
+                    x, y, z = st.columns(3)
+                    x.metric("Estimated parlay hit rate", f"{sim_result['parlay_hit_rate']:.1%}")
+                    y.metric("95% simulation interval", f"{sim_result['confidence_low']:.1%}–{sim_result['confidence_high']:.1%}")
+                    z.metric("Simulations", f"{sim_result['simulations']:,}")
+                    st.write("**Individual simulated leg hit rates:** " + " · ".join(
+                        f"{leg['player']} {leg['market']}: {rate:.1%}"
+                        for leg, rate in zip(candidate["legs"], sim_result["leg_hit_rates"])
+                    ))
+                    st.caption(f"Method: {sim_result['method']} · Shared historical dates: {sim_result['overlap_dates']}")
+                    st.warning(sim_result["warning"])
                 st.caption("Suggested lines are model-generated targets, not confirmed sportsbook lines or calibrated market probabilities. Check that the exact line is offered before betting.")
     elif board:
         st.info(f"Not enough distinct games with adequate player samples for a {leg_count}-leg parlay. Lower the leg count or try another slate.")
