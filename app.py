@@ -68,70 +68,118 @@ with tabs[0]:
     st.caption(f"Slate date: {today} · Only upcoming games are simulated; completed/live games are excluded.")
 
 with tabs[1]:
-    st.subheader("Data-driven AI parlays")
-    st.caption("The model builds player targets from game logs, projected minutes and role trends. OUT, DOUBTFUL and QUESTIONABLE players are excluded. If injury status cannot be verified, parlay generation stops.")
-    leg_count = st.slider("Parlay legs", min_value=2, max_value=5, value=3, key="parlay_legs")
-    if st.button("Build AI parlays", type="primary", key="build_ai_parlays"):
+    st.subheader("AI parlay lab")
+    st.caption("One projection engine powers the player board and every parlay leg. Suggested lines are model targets, not confirmed sportsbook offerings.")
+    leg_count = st.select_slider("Build parlays with", options=[2, 3, 4, 5], value=3, key="parlay_legs")
+    if st.button("Build / refresh AI parlays", type="primary", key="build_ai_parlays"):
         if not scheduled:
             st.warning("No upcoming games are available for this date.")
         else:
             try:
-                with st.spinner("Verifying injuries and loading slate player data…"):
-                    statuses = injury_status_map()
+                with st.spinner("Verifying player availability and loading player game logs…"):
                     board = build_player_projection_board(scheduled, max_players_per_team=6)
-                    board = [row for row in board if not is_unavailable(statuses.get(int(row["player_id"])))]
                     legs = build_model_legs(board, min_sample=8, min_probability=0.58)
-                    candidates = build_candidates(legs, leg_count, 8)
+                    candidate_sets = {}
+                    for size in (2, 3, 4, 5):
+                        candidate_sets[size] = build_candidates(legs, size, 5)
                 st.session_state["nba_edge_board"] = board
-                st.session_state["nba_edge_candidates"] = candidates
-                st.success(f"Loaded {len(board)} player-stat projections and generated {len(candidates)} candidate parlays.")
+                st.session_state["nba_edge_legs"] = legs
+                st.session_state["nba_edge_candidate_sets"] = candidate_sets
+                st.success(f"Loaded {len(board)} player-stat projections, {len(legs)} eligible prop targets, and built parlays from 2 through 5 legs.")
             except Exception as exc:
-                st.session_state["nba_edge_candidates"] = []
+                st.session_state["nba_edge_board"] = []
+                st.session_state["nba_edge_legs"] = []
+                st.session_state["nba_edge_candidate_sets"] = {}
                 st.error(f"Parlay build stopped: {type(exc).__name__}: {exc}")
-                st.info("The app will not guess that players are healthy or show parlays from an unverified injury feed.")
+                st.info("The builder will not assume a player is healthy when availability cannot be verified.")
+
     board = st.session_state.get("nba_edge_board", [])
-    candidates = st.session_state.get("nba_edge_candidates", [])
+    legs = st.session_state.get("nba_edge_legs", [])
+    candidate_sets = st.session_state.get("nba_edge_candidate_sets", {})
+
     if board:
-        st.markdown("**Top model-supported player targets**")
-        preview = pd.DataFrame([{
-            "Player": x["player"], "Matchup": x["matchup"], "Stat": x["market"],
-            "Projection": x["projection"], "Minutes": x["minutes"],
-            "Recent 5": x["last5"], "Recent 10": x["last10"],
-            "Games sampled": x["sample"], "Injury status": x.get("injury_status", "not listed")
-        } for x in board[:30]])
-        st.dataframe(preview, use_container_width=True, hide_index=True)
-    if candidates:
-        st.markdown("**Best candidate parlays**")
-        for index, candidate in enumerate(candidates, 1):
-            with st.expander(f"AI parlay {index} · model separation {candidate['mean_edge']:.1%}"):
-                for leg in candidate["legs"]:
-                    st.write(f"**{leg['player']}** — {leg['direction'].upper()} {leg['line']} {leg['market']} · projection {leg['projection']:.1f} · sample estimate {leg['probability']:.1%} · {leg['matchup']}")
-                st.caption(candidate["warning"])
-                sim_runs = st.select_slider("Monte Carlo runs", options=[5000, 10000, 20000, 50000], value=20000, key=f"sim_runs_{index}")
-                if st.button("Simulate this parlay", key=f"simulate_parlay_{index}"):
-                    try:
-                        with st.spinner("Bootstrapping historical player-game outcomes…"):
-                            result = simulate_parlay(candidate["legs"], simulations=sim_runs)
-                        st.session_state[f"parlay_sim_{index}"] = result
-                    except Exception as exc:
-                        st.error(f"Parlay simulation unavailable: {type(exc).__name__}: {exc}")
-                sim_result = st.session_state.get(f"parlay_sim_{index}")
-                if sim_result:
-                    x, y, z = st.columns(3)
-                    x.metric("Estimated parlay hit rate", f"{sim_result['parlay_hit_rate']:.1%}")
-                    y.metric("95% simulation interval", f"{sim_result['confidence_low']:.1%}–{sim_result['confidence_high']:.1%}")
-                    z.metric("Simulations", f"{sim_result['simulations']:,}")
-                    st.write("**Individual simulated leg hit rates:** " + " · ".join(
-                        f"{leg['player']} {leg['market']}: {rate:.1%}"
-                        for leg, rate in zip(candidate["legs"], sim_result["leg_hit_rates"])
-                    ))
-                    st.caption(f"Method: {sim_result['method']} · Shared historical dates: {sim_result['overlap_dates']}")
-                    st.warning(sim_result["warning"])
-                st.caption("Suggested lines are model-generated targets, not confirmed sportsbook lines or calibrated market probabilities. Check that the exact line is offered before betting.")
-    elif board:
-        st.info(f"Not enough distinct games with adequate player samples for a {leg_count}-leg parlay. Lower the leg count or try another slate.")
+        st.markdown("### Player projection board")
+        st.caption("Recent hit rate is calculated against each model-suggested line using the available player game-log sample. Confidence is sample-based, not a guarantee.")
+        target_rows = []
+        for leg in legs:
+            target_rows.append({
+                "Player": leg["player"],
+                "Matchup": leg["matchup"],
+                "Prop": f'{leg["direction"].upper()} {leg["line"]} {leg["market"]}',
+                "Projection": leg["projection"],
+                "Recent hit rate": leg["consistency_rate"],
+                "Model estimate": leg["probability"],
+                "Confidence floor": leg["confidence_score"],
+                "Games": leg["confidence_sample"],
+                "Minutes": leg["minutes"],
+                "Injury": leg.get("injury_status", "not listed")
+            })
+        if target_rows:
+            target_frame = pd.DataFrame(target_rows)
+            for col in ("Recent hit rate", "Model estimate", "Confidence floor"):
+                target_frame[col] = target_frame[col].map(lambda value: f"{value:.1%}")
+            st.dataframe(target_frame.head(50), use_container_width=True, hide_index=True)
+        else:
+            st.info("No player props met the minimum sample and model-support filters for this slate.")
+
+        st.markdown("### Best parlay combinations")
+        st.caption("Ranked by model edge and prop diversity. The independence product is deliberately not shown as a true parlay probability; use Monte Carlo below for an empirical estimate.")
+        for size in (2, 3, 4, 5):
+            group = candidate_sets.get(size, [])
+            with st.expander(f"{size}-leg parlays · {len(group)} candidates", expanded=(size == leg_count)):
+                if not group:
+                    st.info(f"Not enough distinct games with qualified player samples to build a {size}-leg parlay.")
+                    continue
+                for index, candidate in enumerate(group, 1):
+                    title = f"Option {index} · average model edge {candidate['mean_edge']:.1%} · prop diversity {candidate['market_diversity']:.0%}"
+                    with st.container(border=True):
+                        st.markdown(f"**{title}**")
+                        rows = []
+                        for leg in candidate["legs"]:
+                            rows.append({
+                                "Player": leg["player"],
+                                "Matchup": leg["matchup"],
+                                "Selection": f'{leg["direction"].upper()} {leg["line"]} {leg["market"]}',
+                                "Projection": leg["projection"],
+                                "Historical hit rate": leg["consistency_rate"],
+                                "Model estimate": leg["probability"],
+                                "Sample": leg["confidence_sample"]
+                            })
+                        frame = pd.DataFrame(rows)
+                        for col in ("Historical hit rate", "Model estimate"):
+                            frame[col] = frame[col].map(lambda value: f"{value:.1%}")
+                        st.dataframe(frame, use_container_width=True, hide_index=True)
+                        sim_runs = st.select_slider(
+                            "Monte Carlo simulations",
+                            options=[5000, 10000, 20000, 50000],
+                            value=20000,
+                            key=f"sim_runs_{size}_{index}"
+                        )
+                        sim_key = f"parlay_sim_{size}_{index}"
+                        if st.button("Run Monte Carlo simulation", key=f"simulate_parlay_{size}_{index}"):
+                            try:
+                                with st.spinner("Sampling historical player-game outcomes…"):
+                                    result = simulate_parlay(candidate["legs"], simulations=sim_runs)
+                                st.session_state[sim_key] = result
+                            except Exception as exc:
+                                st.session_state.pop(sim_key, None)
+                                st.error(f"Simulation unavailable: {type(exc).__name__}: {exc}")
+                        sim_result = st.session_state.get(sim_key)
+                        if sim_result:
+                            a, b, c = st.columns(3)
+                            a.metric("Estimated parlay hit rate", f"{sim_result['parlay_hit_rate']:.1%}")
+                            b.metric("95% Monte Carlo interval", f"{sim_result['confidence_low']:.1%}–{sim_result['confidence_high']:.1%}")
+                            c.metric("Simulation runs", f"{sim_result['simulations']:,}")
+                            leg_results = []
+                            for leg, rate in zip(candidate["legs"], sim_result["leg_hit_rates"]):
+                                leg_results.append(f"{leg['player']} {leg['market']}: {rate:.1%}")
+                            st.write("**Simulated leg hit rates:** " + " · ".join(leg_results))
+                            st.caption(f"Sampling method: {sim_result['method']} · Shared historical dates: {sim_result['overlap_dates']}")
+                            st.warning(sim_result["warning"])
+                        st.caption(candidate["warning"])
+        st.info("Important: historical hit rates and bootstrap simulations describe past samples. They are not calibrated sportsbook odds, do not guarantee future results, and may assume independence when players lack enough shared game dates.")
     else:
-        st.info("Tap Build AI parlays to verify player availability, load the slate data and generate candidates.")
+        st.info("Tap Build / refresh AI parlays to load the slate, verify player availability, and generate the projection board and 2–5 leg combinations.")
 
 st.sidebar.subheader("Data status")
 st.sidebar.write(f"NBA provider: {'Connected' if api_key() else 'Missing key'}")
