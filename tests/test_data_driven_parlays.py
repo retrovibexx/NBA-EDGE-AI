@@ -12,7 +12,7 @@ def test_model_target_legs_are_generated_without_book_lines():
     assert all(x["target_line_type"].startswith("model suggestion") for x in legs)
 
 def test_bulk_projection_board_uses_bulk_stats_and_optional_feeds(monkeypatch):
-    monkeypatch.setattr(prop_engine,"_injury_ids",lambda:set())
+    monkeypatch.setattr(prop_engine,"injury_status_map",lambda:{})
     monkeypatch.setattr(prop_engine,"players_for_teams",lambda team_ids:[
         {"id":team_id*10+1,"first_name":"Sample","last_name":"Player","is_active":True,"team":{"id":team_id,"abbreviation":str(team_id)}}
         for team_id in team_ids
