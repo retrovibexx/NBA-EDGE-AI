@@ -2,6 +2,7 @@ import numpy as np
 from datetime import date
 from bdl import current_season_start, team_games, player_game_stats, player_game_history, search_players, team_advanced_averages, injuries, player_season_averages, player_advanced_averages, team_games_history
 from features import player_rows, rolling_projection, minutes_projection, as_float, STAT_MAP
+from injury_guard import injury_status_map
 
 
 def _optional_team_advanced(team_id, season):
@@ -17,10 +18,8 @@ def _optional_injury_penalties(team_ids):
     """Injury data is an adjustment, not a hard dependency for the game simulator."""
     team_ids = set(team_ids)
     impacts = {team_id: {"penalty": 0.0, "count": 0} for team_id in team_ids}
-    try:
-        rows = injuries()
-    except Exception:
-        return impacts
+    # Do not silently simulate as if teams are healthy when injury data failed.
+    rows = injuries()
     relevant = [
         x for x in rows
         if (x.get("player") or {}).get("team_id") in team_ids
@@ -46,6 +45,10 @@ def _optional_injury_penalties(team_ids):
 
 
 def project_player(name, stat):
+    try:
+        statuses = injury_status_map()
+    except Exception as exc:
+        return {"error": str(exc)}
     matches = search_players(name)
     if not matches:
         return {"error": "Player not found in data provider."}
@@ -53,6 +56,10 @@ def project_player(name, stat):
         (p for p in matches if f"{p.get('first_name', '')} {p.get('last_name', '')}".strip().lower() == name.lower()),
         matches[0],
     )
+    status = statuses.get(int(exact["id"]))
+    from injury_guard import is_unavailable
+    if is_unavailable(status):
+        return {"error": f"{exact.get('first_name', '')} {exact.get('last_name', '')} is listed as {status.upper()} and is excluded from projections."}
     rows = player_rows(player_game_stats(exact["id"], current_season_start()))
     if len(rows) < 5:
         rows = player_rows(player_game_history(exact["id"], current_season_start()))
@@ -178,6 +185,7 @@ def predict_game(away, home, simulations=10000, target_date=None, exclude_game_i
             "away_pace": apace, "home_pace": hpace, "away_net_rating": anet, "home_net_rating": hnet,
             "away_injury_penalty": away_injury, "home_injury_penalty": home_injury,
             "away_injured_count": away_injured_count, "home_injured_count": home_injured_count,
+            "injury_feed_verified": True,
             "note": "Uses recent completed-game margins and home court; advanced team ratings and injury adjustments are included only when those feeds are available. Probabilities still require out-of-sample calibration."
         }
     except Exception as e:
