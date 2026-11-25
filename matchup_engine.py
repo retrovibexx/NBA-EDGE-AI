@@ -10,6 +10,7 @@ from bdl import (
     team_games_history, team_lineup_stats, team_box_scores, player_advanced_game_stats, all_player_season_averages,
 )
 from features import player_rows, STAT_MAP, as_float, rolling_projection, minutes_projection
+from injury_guard import injury_status_map, is_unavailable
 
 COMBO_STATS = {
     "PTS":"pts","REB":"reb","AST":"ast","STL":"stl","BLK":"blk","MIN":"min","3PM":"fg3m"
@@ -163,6 +164,13 @@ def _player_advanced_context(player_id,season):
 @st.cache_data(ttl=1800,show_spinner=False)
 def analyze_matchup(player_id,opponent_id,stat="PTS",season=None,include_full=True):
     season=int(season or current_season_start())
+    try:
+        statuses=injury_status_map()
+    except Exception as exc:
+        return {"error":str(exc)}
+    status=statuses.get(int(player_id))
+    if is_unavailable(status):
+        return {"error":f"Player is listed as {status.upper()} and is excluded from matchup projections."}
     raw=player_game_history(int(player_id),season)
     rows=player_rows(raw)
     if len(rows)<5: return {"error":"Not enough player game logs for matchup analysis."}
