@@ -18,8 +18,12 @@ def _optional_injury_penalties(team_ids):
     """Injury data is an adjustment, not a hard dependency for the game simulator."""
     team_ids = set(team_ids)
     impacts = {team_id: {"penalty": 0.0, "count": 0} for team_id in team_ids}
-    # Do not silently simulate as if teams are healthy when injury data failed.
-    rows = injuries()
+    # Injury adjustments are optional for team-level win simulations; player-leg
+    # generation separately fails closed when availability cannot be verified.
+    try:
+        rows = injuries()
+    except Exception:
+        return impacts
     relevant = [
         x for x in rows
         if (x.get("player") or {}).get("team_id") in team_ids
