@@ -18,7 +18,7 @@ def request(path,params=None,required=True):
     try: rpm=int(st.secrets.get("BALLDONTLIE_RPM",os.getenv("BALLDONTLIE_RPM","5")))
     except Exception: rpm=5
     rpm=max(1,min(rpm,5))
-    for attempt in range(4):
+    for attempt in range(2):
         with _rate_lock:
             wait=max(0.0,(60.0/rpm)-(time.monotonic()-_last_request))
             if wait: time.sleep(wait)
@@ -33,9 +33,9 @@ def request(path,params=None,required=True):
                 detail=str(body.get("error") or body.get("message") or body.get("errors") or "")
             except Exception:
                 detail=r.text[:300]
-            if attempt < 3:
+            if attempt < 1:
                 retry_after=r.headers.get("Retry-After")
-                try: delay=min(60.0,max(1.0,float(retry_after))) if retry_after else (15.0,30.0,60.0)[attempt]
+                try: delay=min(60.0,max(1.0,float(retry_after))) if retry_after else 20.0
                 except Exception: delay=(15.0,30.0,60.0)[attempt]
                 time.sleep(delay)
                 continue
