@@ -88,6 +88,7 @@ with tabs[1]:
                 st.write(f"Recent scoring margin: {away['abbreviation']} {result['away_form']:+.1f} ({result['away_games']} games) · {home['abbreviation']} {result['home_form']:+.1f} ({result['home_games']} games)")
                 st.write(f"Estimated injury adjustment (heuristic): {away['abbreviation']} −{result['away_injury_penalty']:.1f} pts · {home['abbreviation']} −{result['home_injury_penalty']:.1f} pts")
                 st.write(f"Rest days: {away['abbreviation']} {result['away_rest_days']} · {home['abbreviation']} {result['home_rest_days']} · Head-to-head games sampled: {result['h2h_games']}")
+                st.caption("Injury feed verified for this simulation. OUT, DOUBTFUL and QUESTIONABLE players are included in the team injury adjustment and are not eligible for player projections/parlay legs.")
                 st.warning(result["note"])
                 if st.button("Save game prediction",key="save_game"):
                     save_game_prediction(g,result); st.success("Saved before tip-off.")
@@ -150,7 +151,7 @@ with tabs[3]:
         except Exception as e: st.error(f"Lineup feed unavailable: {e}")
 with tabs[4]:
     st.subheader('Model-only parlay research')
-    st.caption('No sportsbook feed is required. AI parlays are generated from player game logs, recent minutes and role trends. Optional opponent advanced feeds are skipped to respect your 5-requests-per-minute provider limit.')
+    st.caption('No sportsbook feed is required. AI parlays use player game logs and role trends. OUT, DOUBTFUL and QUESTIONABLE players are filtered out. If the injury feed cannot be verified, parlay generation stops rather than assuming players are healthy.')
     leg_count=st.slider('Parlay size',3,6,3,key='parlay_size')
     if st.button('Build player projection board',type='primary'):
         if not games: st.warning('No games are available for this date.')
