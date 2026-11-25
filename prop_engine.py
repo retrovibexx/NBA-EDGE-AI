@@ -144,15 +144,27 @@ def build_model_legs(board, min_sample=6, min_probability=0.55):
                 continue
             item = {k:v for k,v in row.items() if not k.startswith("_")}
             sample_n, consistency_rate, confidence_floor = _sample_quality(values, line, direction)
+            projection = float(row.get("projection") or 0)
+            last5 = float(row.get("last5") or 0)
+            last10 = float(row.get("last10") or 0)
+            # Require the chart's actual projection to agree with the proposed side.
+            projection_gap = (projection - float(line)) if direction == "over" else (float(line) - projection)
+            projection_support = max(0.0, min(1.0, projection_gap / max(1.0, abs(projection) * 0.20)))
+            trend_gap = (last5 - last10) if direction == "over" else (last10 - last5)
+            trend_support = max(0.0, min(1.0, 0.5 + trend_gap / max(1.0, abs(last10) * 0.5)))
+            model_rank_score = (0.50 * confidence_floor + 0.25 * probability
+                                + 0.20 * projection_support + 0.05 * trend_support)
             item.update({"line": float(line), "direction": direction, "probability": float(probability),
                          "edge": float(probability - .5), "consistency_rate": consistency_rate,
                          "confidence_score": confidence_floor, "confidence_sample": sample_n,
+                         "projection_support": projection_support, "trend_support": trend_support,
+                         "model_rank_score": model_rank_score,
                          "confidence_label": "sample-supported" if sample_n >= 15 else "limited sample",
-                         "source": "NBA Edge model target from recent player logs, minutes, role and available opponent context",
+                         "source": "NBA Edge projection-board chart: projected stat, recent trend, minutes/role and recent box scores",
                          "target_line_type": "model suggestion; verify sportsbook availability"})
             legs.append(item)
-    # Rank by the conservative lower confidence bound first, not raw hit rate alone.
-    return sorted(legs, key=lambda x: (x["confidence_score"], x["confidence_sample"], x["minutes"]), reverse=True)
+    # Rank using both the conservative sample floor and agreement with the visible projection board.
+    return sorted(legs, key=lambda x: (x["model_rank_score"], x["confidence_sample"], x["minutes"]), reverse=True)
 
 def evaluate_manual_lines(board):
     evaluated = []
