@@ -3,6 +3,7 @@ import math
 import numpy as np
 from bdl import player_game_stats_many, current_season_start, players_for_teams
 from features import player_rows, rolling_projection, empirical_over_probability, as_float, minutes_projection
+from injury_guard import injury_status_map, require_available
 
 PROP_STATS = ["PTS", "REB", "AST", "3PM", "STL", "BLK"]
 
@@ -32,9 +33,11 @@ def build_player_projection_board(games, max_players_per_team=4):
                                (game.get("visitor_team") or {}, game.get("home_team") or {})):
             if team.get("id"):
                 teams[int(team["id"])] = (team, opponent, game)
+    # Injury feed is mandatory for player-leg generation: if it is unavailable, fail closed.
+    statuses = injury_status_map()
     try:
         roster = players_for_teams(list(teams))
-        roster = [p for p in roster if p.get("id") and p.get("is_active") is not False]
+        roster = [p for p in roster if p.get("id") and p.get("is_active") is not False and require_available(p["id"], statuses)[0]]
         roster_by_team = {}
         for player in roster:
             tid = (player.get("team") or {}).get("id") or player.get("team_id")
@@ -97,7 +100,7 @@ def build_player_projection_board(games, max_players_per_team=4):
                     "minutes": round(float(mins), 1), "role_change": round(role_change, 1),
                     "opponent_def_rating": round(float(defense), 2) if np.isfinite(defense) else None,
                     "opponent_pace": round(float(pace), 2) if np.isfinite(pace) else None,
-                    "sample": len(values), "line": None, "_values": values
+                    "sample": len(values), "line": None, "injury_status": statuses.get(int(player["id"]), "not listed"), "_values": values
                 })
     return sorted(board, key=lambda x: (x["minutes"], x["sample"]), reverse=True)
 
