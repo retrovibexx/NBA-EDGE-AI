@@ -100,7 +100,13 @@ def build_player_projection_board(games, max_players_per_team=6):
                     "minutes": round(float(mins), 1), "role_change": round(role_change, 1),
                     "opponent_def_rating": round(float(defense), 2) if np.isfinite(defense) else None,
                     "opponent_pace": round(float(pace), 2) if np.isfinite(pace) else None,
-                    "sample": len(values), "line": None, "injury_status": statuses.get(int(player["id"]), "not listed"), "_values": values
+                    "sample": len(values), "line": None, "injury_status": statuses.get(int(player["id"]), "not listed"),
+                    "_values": values,
+                    "_history": [
+                        {"date": str(r.get("date", ""))[:10], "value": as_float(r.get(key))}
+                        for r in logs[:20]
+                        if r.get("date") and np.isfinite(as_float(r.get(key)))
+                    ]
                 })
     return sorted(board, key=lambda x: (x["minutes"], x["sample"]), reverse=True)
 
@@ -154,7 +160,8 @@ def build_model_legs(board, min_sample=6, min_probability=0.55):
             trend_support = max(0.0, min(1.0, 0.5 + trend_gap / max(1.0, abs(last10) * 0.5)))
             model_rank_score = (0.50 * confidence_floor + 0.25 * probability
                                 + 0.20 * projection_support + 0.05 * trend_support)
-            item.update({"line": float(line), "direction": direction, "probability": float(probability),
+            item.update({"simulation_history": row.get("_history", []),
+                         "line": float(line), "direction": direction, "probability": float(probability),
                          "edge": float(probability - .5), "consistency_rate": consistency_rate,
                          "confidence_score": confidence_floor, "confidence_sample": sample_n,
                          "projection_support": projection_support, "trend_support": trend_support,
