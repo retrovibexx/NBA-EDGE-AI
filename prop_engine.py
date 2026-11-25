@@ -24,7 +24,7 @@ def _optional_opponent_context(team_id, season):
     except Exception:
         return {"def_rating": float("nan"), "pace": float("nan")}
 
-def build_player_projection_board(games, max_players_per_team=4):
+def build_player_projection_board(games, max_players_per_team=6):
     """Fetch slate rosters and player logs in bulk; optional context never blocks the board."""
     season = current_season_start()
     teams = {}
